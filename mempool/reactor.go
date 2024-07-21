@@ -17,6 +17,10 @@ import (
 	"github.com/cometbft/cometbft/types"
 )
 
+const (
+	NStates = 1
+)
+
 // Reactor handles mempool tx broadcasting amongst peers.
 // It maintains a map from peer ID to counter, to prevent gossiping txs to the
 // peers you received it from.
@@ -203,15 +207,16 @@ func (memR *Reactor) broadcastTxRoutine(peer p2p.Peer) {
 		}
 	}
 
-	var peerState PeerState
+	// var peerState [NStates]PeerState
 	// Wait until the peer's state is ready. We initialize it in the consensus reactor, but when we
 	// add the peer in Switch, the order in which we call reactors#AddPeer is different every time
 	// due to us using a map. Sometimes other reactors will be initialized before the consensus
 	// reactor. We should wait a few milliseconds and retry. We assume the pointer to the state is
 	// set once and never unset.
 	for {
-		if ps, ok := peer.Get(types.PeerStateKey).(PeerState); ok {
-			peerState = ps
+		// TODO: Ignore optimization for the moment
+		if ps, ok := peer.Get(types.PeerStateKey).([NStates]PeerState); ok {
+			_ = ps
 			break
 		}
 		// Peer does not have a state yet.
@@ -247,10 +252,11 @@ func (memR *Reactor) broadcastTxRoutine(peer p2p.Peer) {
 		//
 		// [RFC 103]: https://github.com/cometbft/cometbft/pull/735
 		memTx := next.Value.(*mempoolTx)
-		if peerState.GetHeight() < memTx.Height()-1 {
-			time.Sleep(PeerCatchupSleepIntervalMS * time.Millisecond)
-			continue
-		}
+		// TODO: Re-enable this optimization
+		// if peerState.GetHeight() < memTx.Height()-1 {
+		// 	time.Sleep(PeerCatchupSleepIntervalMS * time.Millisecond)
+		// 	continue
+		// }
 
 		// NOTE: Transaction batching was disabled due to
 		// https://github.com/tendermint/tendermint/issues/5796
