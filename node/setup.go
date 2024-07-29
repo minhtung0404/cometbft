@@ -39,7 +39,11 @@ import (
 	"github.com/cometbft/cometbft/version"
 )
 
-const readHeaderTimeout = 10 * time.Second
+const (
+	readHeaderTimeout = 10 * time.Second
+
+	NStates = 1
+)
 
 // ChecksummedGenesisDoc combines a GenesisDoc together with its
 // SHA256 checksum.
@@ -336,26 +340,30 @@ func createConsensusReactor(config *cfg.Config,
 	consensusLogger log.Logger,
 	offlineStateSyncHeight int64,
 ) (*cs.Reactor, *cs.State) {
-	consensusState := cs.NewState(
-		config.Consensus,
-		state.Copy(),
-		blockExec,
-		blockStore,
-		mempool,
-		evidencePool,
-		cs.StateMetrics(csMetrics),
-		cs.OfflineStateSyncHeight(offlineStateSyncHeight),
-	)
-	consensusState.SetLogger(consensusLogger)
-	if privValidator != nil {
-		consensusState.SetPrivValidator(privValidator)
+	var consensusStates = [NStates]*cs.State{}
+	for i := 0; i < NStates; i++ {
+		consensusStates[i] = cs.NewState(
+			config.Consensus,
+			state.Copy(),
+			blockExec,
+			blockStore,
+			mempool,
+			evidencePool,
+			cs.StateMetrics(csMetrics),
+			cs.OfflineStateSyncHeight(offlineStateSyncHeight),
+		)
+		consensusStates[i].SetLogger(consensusLogger)
+		consensusStates[i].Height = int64(i)
+		if privValidator != nil {
+			consensusStates[i].SetPrivValidator(privValidator)
+		}
 	}
-	consensusReactor := cs.NewReactor(consensusState, waitSync, cs.ReactorMetrics(csMetrics))
+	consensusReactor := cs.NewReactor(consensusStates, waitSync, cs.ReactorMetrics(csMetrics))
 	consensusReactor.SetLogger(consensusLogger)
 	// services which will be publishing and/or subscribing for messages (events)
 	// consensusReactor will set it on consensusState and blockExecutor
 	consensusReactor.SetEventBus(eventBus)
-	return consensusReactor, consensusState
+	return consensusReactor, consensusStates[0]
 }
 
 func createTransport(

@@ -58,20 +58,20 @@ type Reactor struct {
 type ReactorOption func(*Reactor)
 
 // NewReactor returns a new Reactor with the given consensusState.
-func NewReactor(consensusState *State, waitSync bool, options ...ReactorOption) *Reactor {
+func NewReactor(consensusState [NStates]*State, waitSync bool, options ...ReactorOption) *Reactor {
 	conS := [NStates]*State{}
 	rs := [NStates]*cstypes.RoundState{}
 
 	for i := 0; i < NStates; i++ {
-		conS[i] = consensusState
-		rs[i] = consensusState.GetRoundState()
+		conS[i] = consensusState[i]
+		rs[i] = consensusState[i].GetRoundState()
 	}
 
 	conR := &Reactor{
 		conS:          conS,
 		waitSync:      atomic.Bool{},
 		rs:            rs,
-		initialHeight: consensusState.state.InitialHeight,
+		initialHeight: consensusState[0].state.InitialHeight,
 		Metrics:       NopMetrics(),
 	}
 	conR.BaseReactor = *p2p.NewBaseReactor("Consensus", conR)
@@ -267,7 +267,7 @@ func (conR *Reactor) RemovePeer(p2p.Peer, any) {
 func (conR *Reactor) getConIndex(height int64) int {
 	for i := 0; i < NStates; i++ {
 		conR.rsMtx[i].RLock()
-		if conR.conS[i].state.InitialHeight == height {
+		if conR.rs[i].Height == height {
 			conR.rsMtx[i].RUnlock()
 			return i
 		}
