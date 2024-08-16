@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/cosmos/gogoproto/proto"
@@ -34,6 +35,27 @@ import (
 )
 
 var msgQueueSize = 1000
+
+type Barrier struct {
+	waitCond int
+	cond     *sync.Cond
+}
+
+func NewBarrier() *Barrier {
+	return &Barrier{cond: sync.NewCond(&sync.Mutex{})}
+}
+
+func (b *Barrier) Wait(ctx int) {
+	b.cond.L.Lock()
+	for b.waitCond != ctx {
+		b.cond.Wait()
+	}
+	b.waitCond++
+	if b.waitCond == NStates {
+		b.waitCond = 0
+	}
+	b.cond.Broadcast()
+}
 
 // msgs from the reactor which may update the state.
 type msgInfo struct {
@@ -141,6 +163,10 @@ type State struct {
 	// a buffer to store the concatenated proposal block parts (serialization format)
 	// should only be accessed under the cs.mtx lock
 	serializedBlockBuffer []byte
+
+	// synchronization barrier
+	Barrier *Barrier
+	Idx     int
 }
 
 // StateOption sets an optional parameter on the State.
@@ -715,8 +741,8 @@ func (cs *State) updateToState(state sm.State) {
 	}
 
 	// Next desired block height
-	height := state.LastBlockHeight + 1
-	if height == 1 {
+	height := state.LastBlockHeight + NStates
+	if height == NStates {
 		height = state.InitialHeight
 	}
 
@@ -1234,6 +1260,7 @@ func (cs *State) defaultDecideProposal(height int64, round int32) {
 	} else {
 		// Create a new proposal block from state/txs from the mempool.
 		var err error
+		// DEBUG
 		block, err = cs.createProposalBlock(context.TODO())
 		if err != nil {
 			cs.Logger.Error("Unable to create proposal block", "error", err)
@@ -1871,6 +1898,10 @@ func (cs *State) finalizeCommit(height int64) {
 
 	fail.Fail() // XXX
 
+	println("Before waiting", "finalizeCommit", cs.Idx, "height", height)
+	cs.Barrier.Wait(cs.Idx) // wait for all go routines to finish
+	println("After waiting", "finalizeCommit", cs.Idx, "height", height)
+
 	// Save to blockStore.
 	if cs.blockStore.Height() < block.Height {
 		// NOTE: the seenCommit is local justification to commit this block,
@@ -1914,6 +1945,8 @@ func (cs *State) finalizeCommit(height int64) {
 	// Create a copy of the state for staging and an event cache for txs.
 	stateCopy := cs.state.Copy()
 
+	println("Before update", cs.Idx, "height", cs.state.LastBlockHeight)
+
 	// Execute and commit the block, update and save the state, and update the mempool.
 	// We use apply verified block here because we have verified the block in this function already.
 	// NOTE The block.AppHash won't reflect these txs until the next block.
@@ -1930,13 +1963,19 @@ func (cs *State) finalizeCommit(height int64) {
 		panic(fmt.Sprintf("failed to apply block; error %v", err))
 	}
 
+	println("After update", cs.Idx, "height", stateCopy.LastBlockHeight)
+
 	fail.Fail() // XXX
+
+	cs.Logger.Debug("Applied block", "height", cs.Height)
 
 	// must be called before we update state
 	cs.recordMetrics(height, block)
 
 	// NewHeightStep!
 	cs.updateToState(stateCopy)
+
+	cs.Logger.Debug("Applied block", "height", cs.Height)
 
 	fail.Fail() // XXX
 
@@ -1953,6 +1992,7 @@ func (cs *State) finalizeCommit(height int64) {
 	// * cs.Height has been increment to height+1
 	// * cs.Step is now cstypes.RoundStepNewHeight
 	// * cs.StartTime is set to when we will start round0.
+	cs.Barrier.cond.L.Unlock()
 }
 
 func (cs *State) recordMetrics(height int64, block *types.Block) {
@@ -2551,6 +2591,7 @@ func (cs *State) signVote(
 		}
 	}
 
+	// DEBUG: height regression
 	recoverable, err := types.SignAndCheckVote(vote, cs.privValidator, cs.state.ChainID, extEnabled && (msgType == types.PrecommitType))
 	if err != nil && !recoverable {
 		panic(fmt.Sprintf("non-recoverable error when signing vote %v: %v", vote, err))

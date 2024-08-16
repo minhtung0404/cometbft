@@ -14,6 +14,10 @@ import (
 // -----------------------------------------------------
 // Validate block
 
+const (
+	NStates = 2
+)
+
 func validateBlock(state State, block *types.Block) error {
 	// Validate internal consistency.
 	if err := block.ValidateBasic(); err != nil {
@@ -38,7 +42,7 @@ func validateBlock(state State, block *types.Block) error {
 		return fmt.Errorf("wrong Block.Header.Height. Expected %v for initial block, got %v",
 			state.InitialHeight, block.Height)
 	}
-	if state.LastBlockHeight > 0 && block.Height != state.LastBlockHeight+1 {
+	if state.LastBlockHeight > 0 && block.Height != state.LastBlockHeight+NStates {
 		return fmt.Errorf("wrong Block.Header.Height. Expected %v, got %v",
 			state.LastBlockHeight+1,
 			block.Height,
@@ -92,7 +96,7 @@ func validateBlock(state State, block *types.Block) error {
 	} else {
 		// LastCommit.Signatures length is checked in VerifyCommit.
 		if err := state.LastValidators.VerifyCommit(
-			state.ChainID, state.LastBlockID, block.Height-1, block.LastCommit); err != nil {
+			state.ChainID, state.LastBlockID, block.Height-NStates, block.LastCommit); err != nil {
 			return err
 		}
 	}

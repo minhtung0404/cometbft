@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	NStates = 1
+	NStates = 2
 )
 
 // Reactor handles mempool tx broadcasting amongst peers.

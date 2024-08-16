@@ -41,6 +41,8 @@ const (
 	suffixPbtsHeight    string = "PbtsHeight"
 	suffixInitialHeight string = "InitialHeight"
 	txTTL               uint64 = 5 // height difference at which transactions should be invalid
+
+	NStates = 2
 )
 
 // Application is an ABCI application for use by end-to-end tests. It is a
@@ -718,7 +720,7 @@ func (app *Application) getAppHeight() int64 {
 
 func (app *Application) checkHeightAndExtensions(isPrepareProcessProposal bool, height int64, callsite string) (int64, bool) {
 	appHeight := app.getAppHeight()
-	if height != appHeight {
+	if height >= appHeight+NStates {
 		panic(fmt.Errorf(
 			"got unexpected height in %s request; expected %d, actual %d",
 			callsite, appHeight, height,

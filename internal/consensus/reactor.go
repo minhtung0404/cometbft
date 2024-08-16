@@ -34,7 +34,7 @@ const (
 	blocksToContributeToBecomeGoodPeer = 10000
 	votesToContributeToBecomeGoodPeer  = 10000
 
-	NStates = 1
+	NStates = 2
 )
 
 // -----------------------------------------------------------------------------
@@ -48,9 +48,10 @@ type Reactor struct {
 	waitSync atomic.Bool
 	eventBus *types.EventBus
 
-	rsMtx         [NStates]cmtsync.RWMutex
-	rs            [NStates]*cstypes.RoundState
-	initialHeight int64 // under rsMtx
+	rsMtx [NStates]cmtsync.RWMutex
+	rs    [NStates]*cstypes.RoundState
+	// TODO: remove initialHeight and use rs[conIdx].InitialHeight
+	initialHeight [NStates]int64 // under rsMtx
 
 	Metrics *Metrics
 }
@@ -61,17 +62,24 @@ type ReactorOption func(*Reactor)
 func NewReactor(consensusState [NStates]*State, waitSync bool, options ...ReactorOption) *Reactor {
 	conS := [NStates]*State{}
 	rs := [NStates]*cstypes.RoundState{}
+	initialHeight := [NStates]int64{}
+	barrier := NewBarrier()
 
 	for i := 0; i < NStates; i++ {
 		conS[i] = consensusState[i]
 		rs[i] = consensusState[i].GetRoundState()
+		initialHeight[i] = consensusState[i].state.InitialHeight
+
+		// Set the barrier for the state
+		conS[i].Barrier = barrier
+		conS[i].Idx = i
 	}
 
 	conR := &Reactor{
 		conS:          conS,
 		waitSync:      atomic.Bool{},
 		rs:            rs,
-		initialHeight: consensusState[0].state.InitialHeight,
+		initialHeight: initialHeight,
 		Metrics:       NopMetrics(),
 	}
 	conR.BaseReactor = *p2p.NewBaseReactor("Consensus", conR)
@@ -264,16 +272,31 @@ func (conR *Reactor) RemovePeer(p2p.Peer, any) {
 }
 
 // Finding the consensus instance index by height.
-func (conR *Reactor) getConIndex(height int64) int {
-	for i := 0; i < NStates; i++ {
-		conR.rsMtx[i].RLock()
-		if conR.rs[i].Height == height {
-			conR.rsMtx[i].RUnlock()
-			return i
-		}
-		conR.rsMtx[i].RUnlock()
+func (conR *Reactor) getConIndex(msg Message) int64 {
+	switch msg := msg.(type) {
+	case *NewRoundStepMessage:
+		return (msg.Height - 1) % NStates
+	case *NewValidBlockMessage:
+		return (msg.Height - 1) % NStates
+	case *HasVoteMessage:
+		return (msg.Height - 1) % NStates
+	case *HasProposalBlockPartMessage:
+		return (msg.Height - 1) % NStates
+	case *VoteSetMaj23Message:
+		return (msg.Height - 1) % NStates
+	case *ProposalMessage:
+		return (msg.Proposal.Height - 1) % NStates
+	case *ProposalPOLMessage:
+		return (msg.Height - 1) % NStates
+	case *BlockPartMessage:
+		return (msg.Height - 1) % NStates
+	case *VoteMessage:
+		return (msg.Vote.Height - 1) % NStates
+	case *VoteSetBitsMessage:
+		return (msg.Height - 1) % NStates
+	default:
+		return -1
 	}
-	return -1
 }
 
 // Receive implements Reactor
@@ -303,32 +326,34 @@ func (conR *Reactor) Receive(e p2p.Envelope) {
 	conR.Logger.Debug("Receive", "src", e.Src, "chId", e.ChannelID, "msg", msg)
 
 	// Get peer states
-	ps, ok := e.Src.Get(types.PeerStateKey).([NStates]*PeerState)
+	pss, ok := e.Src.Get(types.PeerStateKey).([NStates]*PeerState)
 	if !ok {
 		panic(fmt.Sprintf("Peer %v has no state", e.Src))
 	}
+
+	conIdx := conR.getConIndex(msg)
+	ps := pss[conIdx]
 
 	switch e.ChannelID {
 	case StateChannel:
 		switch msg := msg.(type) {
 		case *NewRoundStepMessage:
-			conR.rsMtx[0].RLock()
-			initialHeight := conR.initialHeight
-			conR.rsMtx[0].RUnlock()
+			conR.rsMtx[conIdx].RLock()
+			initialHeight := conR.initialHeight[conIdx]
+			conR.rsMtx[conIdx].RUnlock()
 			if err = msg.ValidateHeight(initialHeight); err != nil {
 				conR.Logger.Error("Peer sent us invalid msg", "peer", e.Src, "msg", msg, "err", err)
 				conR.Switch.StopPeerForError(e.Src, err)
 				return
 			}
-			ps[msg.Height%NStates].ApplyNewRoundStepMessage(msg)
+			ps.ApplyNewRoundStepMessage(msg)
 		case *NewValidBlockMessage:
-			ps[msg.Height%NStates].ApplyNewValidBlockMessage(msg)
+			ps.ApplyNewValidBlockMessage(msg)
 		case *HasVoteMessage:
-			ps[msg.Height%NStates].ApplyHasVoteMessage(msg)
+			ps.ApplyHasVoteMessage(msg)
 		case *HasProposalBlockPartMessage:
-			ps[msg.Height%NStates].ApplyHasProposalBlockPartMessage(msg)
+			ps.ApplyHasProposalBlockPartMessage(msg)
 		case *VoteSetMaj23Message:
-			conIdx := conR.getConIndex(msg.Height)
 			if conIdx == -1 {
 				return
 			}
@@ -339,7 +364,7 @@ func (conR *Reactor) Receive(e p2p.Envelope) {
 				return
 			}
 			// Peer claims to have a maj23 for some BlockID at H,R,S,
-			err := votes.SetPeerMaj23(msg.Round, msg.Type, ps[conIdx].peer.ID(), msg.BlockID)
+			err := votes.SetPeerMaj23(msg.Round, msg.Type, ps.peer.ID(), msg.BlockID)
 			if err != nil {
 				conR.Switch.StopPeerForError(e.Src, err)
 				return
@@ -379,15 +404,14 @@ func (conR *Reactor) Receive(e p2p.Envelope) {
 		}
 		switch msg := msg.(type) {
 		case *ProposalMessage:
-			conIdx := msg.Proposal.Height % NStates
-			ps[conIdx].SetHasProposal(msg.Proposal)
+			ps.SetHasProposal(msg.Proposal)
 			conR.conS[conIdx].peerMsgQueue <- msgInfo{msg, e.Src.ID(), cmttime.Now()}
 		case *ProposalPOLMessage:
-			ps[msg.Height%NStates].ApplyProposalPOLMessage(msg)
+			ps.ApplyProposalPOLMessage(msg)
 		case *BlockPartMessage:
-			ps[msg.Height%NStates].SetHasProposalBlockPart(msg.Height, msg.Round, int(msg.Part.Index))
+			ps.SetHasProposalBlockPart(msg.Height, msg.Round, int(msg.Part.Index))
 			conR.Metrics.BlockParts.With("peer_id", string(e.Src.ID())).Add(1)
-			conR.conS[msg.Height%NStates].peerMsgQueue <- msgInfo{msg, e.Src.ID(), time.Time{}}
+			conR.conS[conIdx].peerMsgQueue <- msgInfo{msg, e.Src.ID(), time.Time{}}
 		default:
 			conR.Logger.Error(fmt.Sprintf("Unknown message type %v", reflect.TypeOf(msg)))
 		}
@@ -399,7 +423,6 @@ func (conR *Reactor) Receive(e p2p.Envelope) {
 		}
 		switch msg := msg.(type) {
 		case *VoteMessage:
-			conIdx := conR.getConIndex(msg.Vote.Height)
 			if conIdx == -1 {
 				panic(fmt.Sprintf("Failed to find consensus instance for height %d", msg.Vote.Height))
 			}
@@ -409,7 +432,7 @@ func (conR *Reactor) Receive(e p2p.Envelope) {
 			conR.rsMtx[conIdx].RLock()
 			height, valSize, lastCommitSize := conR.rs[conIdx].Height, conR.rs[conIdx].Validators.Size(), conR.rs[conIdx].LastCommit.Size()
 			conR.rsMtx[conIdx].RUnlock()
-			ps[conIdx].SetHasVoteFromPeer(msg.Vote, height, valSize, lastCommitSize)
+			ps.SetHasVoteFromPeer(msg.Vote, height, valSize, lastCommitSize)
 
 			cs.peerMsgQueue <- msgInfo{msg, e.Src.ID(), time.Time{}}
 
@@ -425,8 +448,6 @@ func (conR *Reactor) Receive(e p2p.Envelope) {
 		}
 		switch msg := msg.(type) {
 		case *VoteSetBitsMessage:
-			conIdx := conR.getConIndex(msg.Height)
-
 			if conIdx == -1 {
 				panic(fmt.Sprintf("Failed to find consensus instance for height %d", msg.Height))
 			}
@@ -445,9 +466,9 @@ func (conR *Reactor) Receive(e p2p.Envelope) {
 				default:
 					panic("Bad VoteSetBitsMessage field Type. Forgot to add a check in ValidateBasic?")
 				}
-				ps[conIdx].ApplyVoteSetBitsMessage(msg, ourVotes)
+				ps.ApplyVoteSetBitsMessage(msg, ourVotes)
 			} else {
-				ps[conIdx].ApplyVoteSetBitsMessage(msg, nil)
+				ps.ApplyVoteSetBitsMessage(msg, nil)
 			}
 		default:
 			// don't punish (leave room for soft upgrades)
@@ -641,7 +662,7 @@ func (conR *Reactor) updateRoundStateNoCsLock(conIdx int) {
 	rs := conR.conS[conIdx].getRoundState()
 	conR.rsMtx[conIdx].Lock()
 	conR.rs[conIdx] = rs
-	conR.initialHeight = conR.conS[conIdx].state.InitialHeight
+	conR.initialHeight[conIdx] = conR.conS[conIdx].state.InitialHeight
 	conR.rsMtx[conIdx].Unlock()
 }
 

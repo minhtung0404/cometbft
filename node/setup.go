@@ -42,7 +42,7 @@ import (
 const (
 	readHeaderTimeout = 10 * time.Second
 
-	NStates = 1
+	NStates = 2
 )
 
 // ChecksummedGenesisDoc combines a GenesisDoc together with its
@@ -342,6 +342,9 @@ func createConsensusReactor(config *cfg.Config,
 ) (*cs.Reactor, *cs.State) {
 	var consensusStates = [NStates]*cs.State{}
 	for i := 0; i < NStates; i++ {
+		state := state.Copy()
+		state.InitialHeight = int64(i + 1)
+
 		consensusStates[i] = cs.NewState(
 			config.Consensus,
 			state.Copy(),
@@ -352,10 +355,12 @@ func createConsensusReactor(config *cfg.Config,
 			cs.StateMetrics(csMetrics),
 			cs.OfflineStateSyncHeight(offlineStateSyncHeight),
 		)
-		consensusStates[i].SetLogger(consensusLogger)
-		consensusStates[i].Height = int64(i)
+
+		consensusStates[i].SetLogger(consensusLogger.With("consensus_state", i))
+		consensusStates[i].Height = int64(i + 1)
+
 		if privValidator != nil {
-			consensusStates[i].SetPrivValidator(privValidator)
+			consensusStates[i].SetPrivValidator(privval.LoadOrGenFilePV(config.PrivValidatorKeyFile(), config.PrivValidatorStateFile()))
 		}
 	}
 	consensusReactor := cs.NewReactor(consensusStates, waitSync, cs.ReactorMetrics(csMetrics))
