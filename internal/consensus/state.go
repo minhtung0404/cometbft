@@ -1269,7 +1269,6 @@ func (cs *State) defaultDecideProposal(height int64, round int32) {
 	} else {
 		// Create a new proposal block from state/txs from the mempool.
 		var err error
-		// DEBUG
 		block, err = cs.createProposalBlock(context.TODO())
 		if err != nil {
 			cs.Logger.Error("Unable to create proposal block", "error", err)
@@ -1907,7 +1906,6 @@ func (cs *State) finalizeCommit(height int64) {
 
 	fail.Fail() // XXX
 
-	// DEBUG
 	cs.Barrier.Wait(cs.Idx) // wait for all go routines to finish
 
 	// Save to blockStore.
@@ -2595,7 +2593,6 @@ func (cs *State) signVote(
 		}
 	}
 
-	// DEBUG: height regression
 	recoverable, err := types.SignAndCheckVote(vote, cs.privValidator, cs.state.ChainID, extEnabled && (msgType == types.PrecommitType))
 	if err != nil && !recoverable {
 		panic(fmt.Sprintf("non-recoverable error when signing vote %v: %v", vote, err))

@@ -314,7 +314,6 @@ func (blockExec *BlockExecutor) applyBlock(state State, blockID types.BlockID, b
 	}
 
 	// Update evpool with the latest state.
-	// DEBUG
 	blockExec.evpool.Update(state, block.Evidence.Evidence)
 
 	fail.Fail() // XXX

@@ -214,7 +214,7 @@ func (memR *Reactor) broadcastTxRoutine(peer p2p.Peer) {
 	// reactor. We should wait a few milliseconds and retry. We assume the pointer to the state is
 	// set once and never unset.
 	for {
-		// TODO: Ignore optimization for the moment
+		// DEBUG Epochs: Ignore optimization for the moment
 		if ps, ok := peer.Get(types.PeerStateKey).([NStates]PeerState); ok {
 			_ = ps
 			break
@@ -252,7 +252,7 @@ func (memR *Reactor) broadcastTxRoutine(peer p2p.Peer) {
 		//
 		// [RFC 103]: https://github.com/cometbft/cometbft/pull/735
 		memTx := next.Value.(*mempoolTx)
-		// TODO: Re-enable this optimization
+		// DEBUG: Re-enable this optimization
 		// if peerState.GetHeight() < memTx.Height()-1 {
 		// 	time.Sleep(PeerCatchupSleepIntervalMS * time.Millisecond)
 		// 	continue

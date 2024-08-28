@@ -378,7 +378,7 @@ func NewNode(ctx context.Context,
 
 	// Determine whether we should do block sync. This must happen after the handshake, since the
 	// app may modify the validator set, specifying ourself as the only validator.
-	// TODO Epochs: Update this
+	// DEBUG Epochs: Update this
 	// blockSync := !onlyValidatorIsUs(state, localAddr)
 	blockSync := false
 	waitSync := stateSync || blockSync
