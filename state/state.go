@@ -253,7 +253,7 @@ func (state State) MakeBlock(
 	switch {
 	case state.ConsensusParams.Feature.PbtsEnabled(height):
 		timestamp = cmttime.Now()
-	case height == state.InitialHeight:
+	case state.InitialHeight <= height && height < state.InitialHeight+NStates:
 		timestamp = state.LastBlockTime // genesis time
 	default:
 		timestamp = lastCommit.MedianTime(state.LastValidators)

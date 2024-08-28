@@ -68,11 +68,11 @@ func NewReactor(consensusState [NStates]*State, waitSync bool, options ...Reacto
 	for i := 0; i < NStates; i++ {
 		conS[i] = consensusState[i]
 		rs[i] = consensusState[i].GetRoundState()
-		initialHeight[i] = consensusState[i].state.InitialHeight
+		// initialHeight[i] = consensusState[i].state.InitialHeight
+		initialHeight[i] = int64(i + 1)
 
 		// Set the barrier for the state
 		conS[i].Barrier = barrier
-		conS[i].Idx = i
 	}
 
 	conR := &Reactor{
@@ -662,7 +662,7 @@ func (conR *Reactor) updateRoundStateNoCsLock(conIdx int) {
 	rs := conR.conS[conIdx].getRoundState()
 	conR.rsMtx[conIdx].Lock()
 	conR.rs[conIdx] = rs
-	conR.initialHeight[conIdx] = conR.conS[conIdx].state.InitialHeight
+	// conR.initialHeight[conIdx] = conR.conS[conIdx].state.InitialHeight
 	conR.rsMtx[conIdx].Unlock()
 }
 
@@ -991,7 +991,7 @@ func pickVoteToSend(
 
 	// Special catchup logic.
 	// If peer is lagging by height 1, send LastCommit.
-	if prs.Height != 0 && rs.Height == prs.Height+1 {
+	if prs.Height != 0 && rs.Height <= prs.Height+NStates {
 		if vote := ps.PickVoteToSend(rs.LastCommit, rng); vote != nil {
 			logger.Debug("Picked rs.LastCommit to send", "height", prs.Height)
 			return vote
@@ -1001,7 +1001,7 @@ func pickVoteToSend(
 	// Catchup logic
 	// If peer is lagging by more than 1, send Commit.
 	blockStoreBase := conS.blockStore.Base()
-	if blockStoreBase > 0 && prs.Height != 0 && rs.Height >= prs.Height+2 && prs.Height >= blockStoreBase {
+	if blockStoreBase > 0 && prs.Height != 0 && rs.Height > prs.Height+NStates && prs.Height >= blockStoreBase {
 		// Load the block's extended commit for prs.Height,
 		// which contains precommit signatures for prs.Height.
 		var ec *types.ExtendedCommit
@@ -1809,7 +1809,7 @@ func (m *NewRoundStepMessage) ValidateHeight(initialHeight int64) error {
 		}
 	}
 
-	if m.Height > initialHeight && m.LastCommitRound < 0 {
+	if m.Height >= initialHeight+NStates && m.LastCommitRound < 0 {
 		return cmterrors.ErrInvalidField{
 			Field:  "LastCommitRound",
 			Reason: fmt.Sprintf("can only be negative for initial height %v", initialHeight),

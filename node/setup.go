@@ -342,18 +342,16 @@ func createConsensusReactor(config *cfg.Config,
 ) (*cs.Reactor, *cs.State) {
 	var consensusStates = [NStates]*cs.State{}
 	for i := 0; i < NStates; i++ {
-		state := state.Copy()
-		state.InitialHeight = int64(i + 1)
-
 		consensusStates[i] = cs.NewState(
 			config.Consensus,
-			state.Copy(),
+			&state,
 			blockExec,
 			blockStore,
 			mempool,
 			evidencePool,
 			cs.StateMetrics(csMetrics),
 			cs.OfflineStateSyncHeight(offlineStateSyncHeight),
+			func(cs *cs.State) { cs.Idx = int64(i) },
 		)
 
 		consensusStates[i].SetLogger(consensusLogger.With("consensus_state", i))

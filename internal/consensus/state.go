@@ -37,24 +37,28 @@ import (
 var msgQueueSize = 1000
 
 type Barrier struct {
-	waitCond int
+	waitCond int64
 	cond     *sync.Cond
 }
 
 func NewBarrier() *Barrier {
-	return &Barrier{cond: sync.NewCond(&sync.Mutex{})}
+	return &Barrier{waitCond: 0, cond: sync.NewCond(&sync.Mutex{})}
 }
 
-func (b *Barrier) Wait(ctx int) {
+func (b *Barrier) Wait(ctx int64) {
 	b.cond.L.Lock()
 	for b.waitCond != ctx {
 		b.cond.Wait()
 	}
+}
+
+func (b *Barrier) Unlock(ctx int64) {
 	b.waitCond++
 	if b.waitCond == NStates {
 		b.waitCond = 0
 	}
 	b.cond.Broadcast()
+	b.cond.L.Unlock()
 }
 
 // msgs from the reactor which may update the state.
@@ -114,7 +118,7 @@ type State struct {
 	// internal state
 	mtx cmtsync.RWMutex
 	cstypes.RoundState
-	state sm.State // State until height-1.
+	state *sm.State // State until height-1.
 	// privValidator pubkey, memoized for the duration of one block
 	// to avoid extra requests to HSM
 	privValidatorPubKey crypto.PubKey
@@ -166,7 +170,7 @@ type State struct {
 
 	// synchronization barrier
 	Barrier *Barrier
-	Idx     int
+	Idx     int64
 }
 
 // StateOption sets an optional parameter on the State.
@@ -175,7 +179,7 @@ type StateOption func(*State)
 // NewState returns a new State.
 func NewState(
 	config *cfg.ConsensusConfig,
-	state sm.State,
+	state *sm.State,
 	blockExec *sm.BlockExecutor,
 	blockStore sm.BlockStore,
 	txNotifier txNotifier,
@@ -214,13 +218,16 @@ func NewState(
 		// than the height at which we statesync, consensus will panic because
 		// it will try to reconstruct the extended commit here.
 		if cs.offlineStateSyncHeight != 0 {
-			cs.reconstructSeenCommit(state)
+			cs.reconstructSeenCommit(*state)
 		} else {
-			cs.reconstructLastCommit(state)
+			cs.reconstructLastCommit(*state)
 		}
 	}
 
-	cs.updateToState(state)
+	cs.updateToState(*state)
+	if cs.state == nil {
+		cs.state = state
+	}
 
 	// NOTE: we do not call scheduleRound0 yet, we do that upon Start()
 
@@ -683,7 +690,7 @@ func (cs *State) updateToState(state sm.State) {
 		))
 	}
 
-	if !cs.state.IsEmpty() {
+	if cs.state != nil && !cs.state.IsEmpty() {
 		if cs.state.LastBlockHeight > 0 && cs.state.LastBlockHeight+1 != cs.Height {
 			// This might happen when someone else is mutating cs.state.
 			// Someone forgot to pass in state.Copy() somewhere?!
@@ -743,7 +750,7 @@ func (cs *State) updateToState(state sm.State) {
 	// Next desired block height
 	height := state.LastBlockHeight + NStates
 	if height == NStates {
-		height = state.InitialHeight
+		height = int64(cs.Idx + 1)
 	}
 
 	// RoundState fields
@@ -786,7 +793,9 @@ func (cs *State) updateToState(state sm.State) {
 	cs.LastValidators = state.LastValidators
 	cs.TriggeredTimeoutPrecommit = false
 
-	cs.state = state
+	if cs.state != nil {
+		*cs.state = state
+	}
 
 	// Finally, broadcast RoundState
 	cs.newStep()
@@ -1333,7 +1342,7 @@ func (cs *State) createProposalBlock(ctx context.Context) (*types.Block, error) 
 	// TODO(sergio): wouldn't it be easier if CreateProposalBlock accepted cs.LastCommit directly?
 	var lastExtCommit *types.ExtendedCommit
 	switch {
-	case cs.Height == cs.state.InitialHeight:
+	case cs.Height == cs.state.InitialHeight+cs.Idx:
 		// We're creating a proposal for the first block.
 		// The commit is empty, but not nil.
 		lastExtCommit = &types.ExtendedCommit{}
@@ -1354,7 +1363,7 @@ func (cs *State) createProposalBlock(ctx context.Context) (*types.Block, error) 
 
 	proposerAddr := cs.privValidatorPubKey.Address()
 
-	ret, err := cs.blockExec.CreateProposalBlock(ctx, cs.Height, cs.state, lastExtCommit, proposerAddr)
+	ret, err := cs.blockExec.CreateProposalBlock(ctx, cs.Height, *cs.state, lastExtCommit, proposerAddr)
 	if err != nil {
 		panic(err)
 	}
@@ -1491,7 +1500,7 @@ func (cs *State) defaultDoPrevote(height int64, round int32) {
 			}
 
 			// Validate proposal block, from consensus' perspective
-			err := cs.blockExec.ValidateBlock(cs.state, cs.ProposalBlock)
+			err := cs.blockExec.ValidateBlock(*cs.state, cs.ProposalBlock)
 			if err != nil {
 				// ProposalBlock is invalid, prevote nil.
 				logger.Error("prevote step: consensus deems this block invalid; prevoting nil",
@@ -1508,7 +1517,7 @@ func (cs *State) defaultDoPrevote(height int64, round int32) {
 			// the liveness properties of consensus.
 			// Please see `PrepareProosal`-`ProcessProposal` coherence and determinism properties
 			// in the ABCI++ specification.
-			isAppValid, err := cs.blockExec.ProcessProposal(cs.ProposalBlock, cs.state)
+			isAppValid, err := cs.blockExec.ProcessProposal(cs.ProposalBlock, *cs.state)
 			if err != nil {
 				panic(fmt.Sprintf(
 					"state machine returned an error (%v) when calling ProcessProposal", err,
@@ -1706,7 +1715,7 @@ func (cs *State) enterPrecommit(height int64, round int32) {
 		logger.Debug("Precommit step: +2/3 prevoted proposal block; locking", "hash", blockID.Hash)
 
 		// Validate the block.
-		if err := cs.blockExec.ValidateBlock(cs.state, cs.ProposalBlock); err != nil {
+		if err := cs.blockExec.ValidateBlock(*cs.state, cs.ProposalBlock); err != nil {
 			panic(fmt.Sprintf("Precommit step; +2/3 prevoted for an invalid block: %v; relocking", err))
 		}
 
@@ -1884,7 +1893,7 @@ func (cs *State) finalizeCommit(height int64) {
 		panic("cannot finalize commit; proposal block does not hash to commit hash")
 	}
 
-	if err := cs.blockExec.ValidateBlock(cs.state, block); err != nil {
+	if err := cs.blockExec.ValidateBlock(*cs.state, block); err != nil {
 		panic(fmt.Errorf("+2/3 committed an invalid block: %w", err))
 	}
 
@@ -1898,9 +1907,8 @@ func (cs *State) finalizeCommit(height int64) {
 
 	fail.Fail() // XXX
 
-	println("Before waiting", "finalizeCommit", cs.Idx, "height", height)
+	// DEBUG
 	cs.Barrier.Wait(cs.Idx) // wait for all go routines to finish
-	println("After waiting", "finalizeCommit", cs.Idx, "height", height)
 
 	// Save to blockStore.
 	if cs.blockStore.Height() < block.Height {
@@ -1945,8 +1953,6 @@ func (cs *State) finalizeCommit(height int64) {
 	// Create a copy of the state for staging and an event cache for txs.
 	stateCopy := cs.state.Copy()
 
-	println("Before update", cs.Idx, "height", cs.state.LastBlockHeight)
-
 	// Execute and commit the block, update and save the state, and update the mempool.
 	// We use apply verified block here because we have verified the block in this function already.
 	// NOTE The block.AppHash won't reflect these txs until the next block.
@@ -1962,8 +1968,6 @@ func (cs *State) finalizeCommit(height int64) {
 	if err != nil {
 		panic(fmt.Sprintf("failed to apply block; error %v", err))
 	}
-
-	println("After update", cs.Idx, "height", stateCopy.LastBlockHeight)
 
 	fail.Fail() // XXX
 
@@ -1992,7 +1996,7 @@ func (cs *State) finalizeCommit(height int64) {
 	// * cs.Height has been increment to height+1
 	// * cs.Step is now cstypes.RoundStepNewHeight
 	// * cs.StartTime is set to when we will start round0.
-	cs.Barrier.cond.L.Unlock()
+	cs.Barrier.Unlock(cs.Idx)
 }
 
 func (cs *State) recordMetrics(height int64, block *types.Block) {
@@ -2006,7 +2010,7 @@ func (cs *State) recordMetrics(height int64, block *types.Block) {
 	// height=0 -> MissingValidators and MissingValidatorsPower are both 0.
 	// Remember that the first LastCommit is intentionally empty, so it's not
 	// fair to increment missing validators number.
-	if height > cs.state.InitialHeight {
+	if height >= cs.state.InitialHeight+NStates {
 		// Sanity check that commit size matches validator set size - only applies
 		// after first block.
 		var (
@@ -2583,7 +2587,7 @@ func (cs *State) signVote(
 		// if the signedMessage type is for a non-nil precommit, add
 		// VoteExtension
 		if extEnabled {
-			ext, err := cs.blockExec.ExtendVote(context.TODO(), vote, block, cs.state)
+			ext, err := cs.blockExec.ExtendVote(context.TODO(), vote, block, *cs.state)
 			if err != nil {
 				return nil, err
 			}

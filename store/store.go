@@ -725,7 +725,7 @@ func (bs *BlockStore) saveBlockToBatch(
 
 	blockMetaMarshallDiff += time.Since(marshallTime).Seconds()
 
-	if err := batch.Set(bs.dbKeyLayout.CalcBlockCommitKey(height-1), blockCommitBytes); err != nil {
+	if err := batch.Set(bs.dbKeyLayout.CalcBlockCommitKey(height-sm.NStates), blockCommitBytes); err != nil {
 		return err
 	}
 

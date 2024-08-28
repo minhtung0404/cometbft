@@ -38,11 +38,11 @@ func validateBlock(state State, block *types.Block) error {
 			block.ChainID,
 		)
 	}
-	if state.LastBlockHeight == 0 && block.Height != state.InitialHeight {
+	if state.LastBlockHeight == 0 && (block.Height < state.InitialHeight || block.Height >= state.InitialHeight+NStates) {
 		return fmt.Errorf("wrong Block.Header.Height. Expected %v for initial block, got %v",
 			state.InitialHeight, block.Height)
 	}
-	if state.LastBlockHeight > 0 && block.Height != state.LastBlockHeight+NStates {
+	if state.LastBlockHeight > 0 && (block.Height < state.LastBlockHeight+1 || block.Height >= state.LastBlockHeight+1+NStates) {
 		return fmt.Errorf("wrong Block.Header.Height. Expected %v, got %v",
 			state.LastBlockHeight+1,
 			block.Height,
@@ -89,7 +89,7 @@ func validateBlock(state State, block *types.Block) error {
 	}
 
 	// Validate block LastCommit.
-	if block.Height == state.InitialHeight {
+	if block.Height >= state.InitialHeight && block.Height < state.InitialHeight+NStates {
 		if len(block.LastCommit.Signatures) != 0 {
 			return errors.New("initial block can't have LastCommit signatures")
 		}
@@ -122,7 +122,7 @@ func validateBlock(state State, block *types.Block) error {
 	}
 
 	switch {
-	case block.Height > state.InitialHeight:
+	case block.Height >= state.InitialHeight+NStates:
 		if !block.Time.After(state.LastBlockTime) {
 			return fmt.Errorf("block time %v not greater than last block time %v",
 				block.Time,
@@ -139,7 +139,7 @@ func validateBlock(state State, block *types.Block) error {
 			}
 		}
 
-	case block.Height == state.InitialHeight:
+	case block.Height >= state.InitialHeight:
 		genesisTime := state.LastBlockTime
 		if block.Time.Before(genesisTime) {
 			return fmt.Errorf("block time %v is before genesis time %v",
