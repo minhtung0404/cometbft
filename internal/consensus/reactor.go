@@ -64,6 +64,7 @@ func NewReactor(consensusState [NStates]*State, waitSync bool, options ...Reacto
 	rs := [NStates]*cstypes.RoundState{}
 	initialHeight := [NStates]int64{}
 	barrier := NewBarrier()
+	commBarrier := NewCommutativityBarrier(consensusState[0].blockExec)
 
 	for i := 0; i < NStates; i++ {
 		conS[i] = consensusState[i]
@@ -73,6 +74,7 @@ func NewReactor(consensusState [NStates]*State, waitSync bool, options ...Reacto
 
 		// Set the barrier for the state
 		conS[i].Barrier = barrier
+		conS[i].CommutativityBarrier = commBarrier
 	}
 
 	conR := &Reactor{

@@ -255,6 +255,11 @@ func (blockExec *BlockExecutor) applyBlock(state State, blockID types.BlockID, b
 		return state, err
 	}
 
+	value := ""
+	if block.Data.Txs.Len() > 0 {
+		value = block.Data.Txs[0].String()
+	}
+
 	blockExec.logger.Info(
 		"Finalized block",
 		"height", block.Height,
@@ -262,6 +267,8 @@ func (blockExec *BlockExecutor) applyBlock(state State, blockID types.BlockID, b
 		"num_val_updates", len(abciResponse.ValidatorUpdates),
 		"block_app_hash", fmt.Sprintf("%X", abciResponse.AppHash),
 		"syncing_to_height", syncingToHeight,
+		"time", float64(endTime-startTime)/1000000,
+		"value", value,
 	)
 
 	// Assert that the application correctly returned tx results for each of the transactions provided in the block
@@ -314,7 +321,7 @@ func (blockExec *BlockExecutor) applyBlock(state State, blockID types.BlockID, b
 	}
 
 	// Update evpool with the latest state.
-	blockExec.evpool.Update(state, block.Evidence.Evidence)
+	// blockExec.evpool.Update(state, block.Evidence.Evidence)
 
 	fail.Fail() // XXX
 
@@ -468,6 +475,14 @@ func (blockExec *BlockExecutor) asyncUpdateMempool(
 		// would need to do is dump the mempool and restart it.
 		panic(fmt.Sprintf("client error during mempool.Update; error %v", err))
 	}
+}
+
+func (blockExec *BlockExecutor) CheckBlocksCommute(blocks [][][]byte) (bool, error) {
+	res, err := blockExec.proxyApp.CheckBlocksCommute(context.TODO(), blocks)
+	if err != nil {
+		blockExec.logger.Error("Client error during proxyAppConn.CheckBlocksCommutativity", "err", err)
+	}
+	return res, err
 }
 
 // ---------------------------------------------------------

@@ -61,6 +61,50 @@ func (b *Barrier) Unlock(ctx int64) {
 	b.cond.L.Unlock()
 }
 
+type CommutativityBarrier struct {
+	waitCond int64
+	cond     *sync.Cond
+
+	blockExec   *sm.BlockExecutor
+	blocks      [][][]byte
+	commutative bool
+}
+
+func NewCommutativityBarrier(blockExec *sm.BlockExecutor) *CommutativityBarrier {
+	return &CommutativityBarrier{
+		waitCond:    0,
+		cond:        sync.NewCond(&sync.Mutex{}),
+		blockExec:   blockExec,
+		blocks:      make([][][]byte, NStates),
+		commutative: false,
+	}
+}
+
+func (b *CommutativityBarrier) Wait(idx int64, block [][]byte) bool {
+	b.cond.L.Lock()
+	defer b.cond.L.Unlock()
+
+	b.blocks[idx] = block
+	b.waitCond++
+
+	if b.waitCond == NStates {
+		res, err := b.blockExec.CheckBlocksCommute(b.blocks)
+		b.commutative = res
+		if err != nil {
+			b.commutative = false
+		}
+
+		b.waitCond = 0
+		b.cond.Broadcast()
+		return b.commutative
+	}
+
+	for b.waitCond != 0 {
+		b.cond.Wait()
+	}
+	return b.commutative
+}
+
 // msgs from the reactor which may update the state.
 type msgInfo struct {
 	Msg         Message   `json:"msg"`
@@ -171,6 +215,9 @@ type State struct {
 	// synchronization barrier
 	Barrier *Barrier
 	Idx     int64
+
+	// commutativity barrier
+	CommutativityBarrier *CommutativityBarrier
 }
 
 // StateOption sets an optional parameter on the State.
@@ -1906,10 +1953,22 @@ func (cs *State) finalizeCommit(height int64) {
 
 	fail.Fail() // XXX
 
-	cs.Barrier.Wait(cs.Idx) // wait for all go routines to finish
+	// wait to check for commutativity
+	commute := cs.CommutativityBarrier.Wait(cs.Idx, block.Txs.ToSliceOfBytes())
+
+	if commute {
+		logger.Info("Blocks commutative", "height", height)
+	} else {
+		logger.Info("Blocks non-commutative", "height", height)
+	}
+
+	// if no commute, wait here
+	if !commute {
+		cs.Barrier.Wait(cs.Idx) // wait for all goroutines before it to finish
+	}
 
 	// Save to blockStore.
-	if cs.blockStore.Height() < block.Height {
+	if cs.blockStore.LoadBlockMeta(height) == nil {
 		// NOTE: the seenCommit is local justification to commit this block,
 		// but may differ from the LastCommit included in the next block
 		seenExtendedCommit := cs.Votes.Precommits(cs.CommitRound).MakeExtendedCommit(cs.state.ConsensusParams.Feature)
@@ -1917,6 +1976,7 @@ func (cs *State) finalizeCommit(height int64) {
 			cs.blockStore.SaveBlockWithExtendedCommit(block, blockParts, seenExtendedCommit)
 		} else {
 			cs.blockStore.SaveBlock(block, blockParts, seenExtendedCommit.ToCommit())
+			logger.Info("Saved block to blockstore ", "height", block.Height)
 		}
 	} else {
 		// Happens during replay if we already saved the block but didn't commit
@@ -1969,7 +2029,12 @@ func (cs *State) finalizeCommit(height int64) {
 
 	fail.Fail() // XXX
 
-	cs.Logger.Debug("Applied block", "height", cs.Height)
+	// if commute, wait here instead
+	if commute {
+		cs.Barrier.Wait(cs.Idx)
+	}
+
+	cs.Logger.Info("Applied block", "height", cs.Height)
 
 	// must be called before we update state
 	cs.recordMetrics(height, block)
@@ -1977,7 +2042,7 @@ func (cs *State) finalizeCommit(height int64) {
 	// NewHeightStep!
 	cs.updateToState(stateCopy)
 
-	cs.Logger.Debug("Applied block", "height", cs.Height)
+	cs.Logger.Info("Applied block and recorded metrics", "height", cs.Height, "last_commit_height", cs.LastCommit.GetHeight())
 
 	fail.Fail() // XXX
 

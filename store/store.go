@@ -598,7 +598,7 @@ func (bs *BlockStore) SaveBlock(block *types.Block, blockParts *types.PartSet, s
 
 	bs.mtx.Lock()
 	defer bs.mtx.Unlock()
-	bs.height = block.Height
+	bs.height = max(bs.height, block.Height)
 	if bs.base == 0 {
 		bs.base = block.Height
 	}
@@ -675,9 +675,9 @@ func (bs *BlockStore) saveBlockToBatch(
 	height := block.Height
 	hash := block.Hash()
 
-	if g, w := height, bs.Height()+1; bs.Base() > 0 && g != w {
-		return fmt.Errorf("BlockStore can only save contiguous blocks. Wanted %v, got %v", w, g)
-	}
+	// if g, w := height, bs.Height()+1; bs.Base() > 0 && g != w {
+	// 	return fmt.Errorf("BlockStore can only save contiguous blocks. Wanted %v, got %v", w, g)
+	// }
 	if !blockParts.IsComplete() {
 		return errors.New("BlockStore can only save complete block part sets")
 	}
