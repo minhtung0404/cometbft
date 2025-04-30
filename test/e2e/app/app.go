@@ -305,10 +305,12 @@ func (app *Application) FinalizeBlock(_ context.Context, req *abci.FinalizeBlock
 	if err != nil {
 		return nil, err
 	}
+	app.logger.Info("starting to finalizing in app", "height", req.Height)
 
 	txs := make([]*abci.ExecTxResult, len(req.Txs))
 
 	for i, tx := range req.Txs {
+		app.logger.Info("starting to finalizing in app 2", "height", req.Height)
 		key, value, err := parseTx(tx)
 		if err != nil {
 			panic(err) // shouldn't happen since we verified it in CheckTx and ProcessProposal
@@ -317,6 +319,7 @@ func (app *Application) FinalizeBlock(_ context.Context, req *abci.FinalizeBlock
 			panic(fmt.Errorf("detected a transaction with key %q; this key is reserved and should have been filtered out", prefixReservedKey))
 		}
 		app.state.Set(key, value)
+		app.logger.Info("finalizing in app", "height", req.Height, "key", key, "value", value)
 
 		app.seenTxs.Delete(cmttypes.Tx(tx).Key())
 
@@ -699,6 +702,57 @@ func (app *Application) VerifyVoteExtension(_ context.Context, req *abci.VerifyV
 
 func (app *Application) Rollback() error {
 	return app.state.Rollback()
+}
+
+func (app *Application) CheckBlocksCommutativity(_ context.Context, blocks [][][]byte) (bool, error) {
+	// r := &abci.Request{Value: &abci.Request_CheckBlockCommutativity{CheckBlockCommutativity: &abci.CheckBlockCommutativityRequest{}}}
+	// err := app.logABCIRequest(r)
+	// if err != nil {
+	// 	return false, err
+	// }
+
+	n := len(blocks)
+	// list of maps
+	valueList := make([]map[string]string, n)
+	for i := 0; i < n; i++ {
+		valueList[i] = make(map[string]string)
+		for _, tx := range blocks[i] {
+			key, value, err := parseTx(tx)
+			if err != nil {
+				return false, err
+			}
+			if key == prefixReservedKey {
+				return false, fmt.Errorf("detected a transaction with key %q; this key is reserved and should have been filtered out", prefixReservedKey)
+			}
+			valueList[i][key] = value
+		}
+	}
+
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			commute, err := app.checkBlockCommute(valueList[i], valueList[j])
+			if err != nil {
+				return false, err
+			}
+			if !commute {
+				return false, fmt.Errorf("blocks %d and %d do not commute", i, j)
+			}
+		}
+	}
+	return true, nil
+}
+
+func (app *Application) checkBlockCommute(block1 map[string]string, block2 map[string]string) (bool, error) {
+	commute := true
+	for key, value1 := range block1 {
+		if value2, ok := block2[key]; ok {
+			if value1 != value2 {
+				commute = false
+				break
+			}
+		}
+	}
+	return commute, nil
 }
 
 func (app *Application) getAppHeight() int64 {

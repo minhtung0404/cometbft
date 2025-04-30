@@ -61,6 +61,10 @@ func TestApp_Hash(t *testing.T) {
 
 		block, err := client.Block(ctx, &requestedHeight)
 		require.NoError(t, err)
+		fmt.Println("wanted height", requestedHeight)
+		fmt.Println("info height", info.Response.LastBlockHeight)
+		fmt.Println("block height", block.Block.Height)
+		fmt.Println("block hash", block.Block.AppHash.String())
 		require.Equal(t,
 			hex.EncodeToString(info.Response.LastBlockAppHash),
 			hex.EncodeToString(block.Block.AppHash.Bytes()),
@@ -97,6 +101,10 @@ func TestApp_Tx(t *testing.T) {
 		waitTime := 30 * time.Second
 		require.Eventuallyf(t, func() bool {
 			txResp, err := client.Tx(ctx, hash, false)
+			fmt.Println("dumbahh error: ", err)
+			if err == nil && !bytes.Equal(txResp.Tx, tx) {
+				fmt.Println("no more error: ", err, " ", txResp.Tx, " ", tx)
+			}
 			return err == nil && bytes.Equal(txResp.Tx, tx)
 		}, waitTime, time.Second,
 			"submitted tx wasn't committed after %v", waitTime,
