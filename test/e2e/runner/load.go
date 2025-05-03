@@ -93,7 +93,7 @@ func loadGenerate(ctx context.Context, txCh chan<- types.Tx, testnet *e2e.Testne
 			close(txCh)
 			return
 		}
-		t.Reset(time.Second)
+		t.Reset(time.Second / 10)
 
 		// A context with a timeout is created here to time the createTxBatch
 		// function out. If createTxBatch has not completed its work by the time

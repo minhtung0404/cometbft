@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	mathrand "math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -42,7 +43,7 @@ const (
 	suffixInitialHeight string = "InitialHeight"
 	txTTL               uint64 = 5 // height difference at which transactions should be invalid
 
-	NStates = 2
+	NStates = 4
 )
 
 // Application is an ABCI application for use by end-to-end tests. It is a
@@ -549,6 +550,9 @@ func (app *Application) PrepareProposal(
 		// Coherence: No need to call parseTx, as the check is stateless and has been performed by CheckTx
 		totalBytes = extTxLen
 	}
+	mathrand.Shuffle(len(req.Txs), func(i, j int) {
+		req.Txs[i], req.Txs[j] = req.Txs[j], req.Txs[i]
+	})
 	for _, tx := range req.Txs {
 		if areExtensionsEnabled && strings.HasPrefix(string(tx), extTxPrefix) {
 			// When vote extensions are enabled, our generated transaction takes precedence
@@ -560,13 +564,14 @@ func (app *Application) PrepareProposal(
 			continue
 		}
 		txLen := cmttypes.ComputeProtoSizeForTxs([]cmttypes.Tx{tx})
-		if totalBytes+txLen > req.MaxTxBytes {
+		if totalBytes+txLen > req.MaxTxBytes || len(txs) >= 2 {
 			break
 		}
 		totalBytes += txLen
 		// Coherence: No need to call parseTx, as the check is stateless and has been performed by CheckTx
 		txs = append(txs, tx)
 	}
+	app.logger.Info("BRUH preparing proposal", "height", req.Height, "givenTxs", len(req.Txs), "realTxs", len(txs), "totalBytes", totalBytes, "maxTxBytes", req.MaxTxBytes)
 
 	if app.cfg.PrepareProposalDelay != 0 {
 		time.Sleep(app.cfg.PrepareProposalDelay)

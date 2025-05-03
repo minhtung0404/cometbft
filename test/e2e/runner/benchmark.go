@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"sort"
 	"time"
 
 	e2e "github.com/cometbft/cometbft/test/e2e/pkg"
@@ -171,6 +172,10 @@ func fetchBlockChainSample(ctx context.Context, testnet *e2e.Testnet, benchmarkL
 
 func splitIntoBlockIntervals(blocks []*types.BlockMeta) []time.Duration {
 	intervals := make([]time.Duration, len(blocks)-1)
+	// sort the blocks by Header.Time
+	sort.Slice(blocks, func(i, j int) bool {
+		return blocks[i].Header.Time.Before(blocks[j].Header.Time)
+	})
 	lastTime := blocks[0].Header.Time
 	for i, block := range blocks {
 		// skip the first block
