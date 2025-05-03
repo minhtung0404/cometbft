@@ -24,8 +24,6 @@ type AppConnConsensus interface {
 	VerifyVoteExtension(ctx context.Context, req *abcitypes.VerifyVoteExtensionRequest) (*abcitypes.VerifyVoteExtensionResponse, error)
 	FinalizeBlock(ctx context.Context, req *abcitypes.FinalizeBlockRequest) (*abcitypes.FinalizeBlockResponse, error)
 	Commit(ctx context.Context) (*abcitypes.CommitResponse, error)
-
-	CheckBlocksCommute(ctx context.Context, blocks [][][]byte) (bool, error)
 }
 
 type AppConnMempool interface {
@@ -110,11 +108,6 @@ func (app *appConnConsensus) FinalizeBlock(ctx context.Context, req *abcitypes.F
 func (app *appConnConsensus) Commit(ctx context.Context) (*abcitypes.CommitResponse, error) {
 	defer addTimeSample(app.metrics.MethodTimingSeconds.With("method", "commit", "type", "sync"))()
 	return app.appConn.Commit(ctx, &abcitypes.CommitRequest{})
-}
-
-func (app *appConnConsensus) CheckBlocksCommute(ctx context.Context, blocks [][][]byte) (bool, error) {
-	defer addTimeSample(app.metrics.MethodTimingSeconds.With("method", "check_blocks_commute", "type", "sync"))()
-	return app.appConn.CheckBlocksCommute(ctx, blocks)
 }
 
 // ------------------------------------------------

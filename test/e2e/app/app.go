@@ -43,7 +43,7 @@ const (
 	suffixInitialHeight string = "InitialHeight"
 	txTTL               uint64 = 5 // height difference at which transactions should be invalid
 
-	NStates = 4
+	NStates = 2
 )
 
 // Application is an ABCI application for use by end-to-end tests. It is a

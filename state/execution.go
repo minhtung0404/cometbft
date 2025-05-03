@@ -477,14 +477,6 @@ func (blockExec *BlockExecutor) asyncUpdateMempool(
 	}
 }
 
-func (blockExec *BlockExecutor) CheckBlocksCommute(blocks [][][]byte) (bool, error) {
-	res, err := blockExec.proxyApp.CheckBlocksCommute(context.TODO(), blocks)
-	if err != nil {
-		blockExec.logger.Error("Client error during proxyAppConn.CheckBlocksCommutativity", "err", err)
-	}
-	return res, err
-}
-
 // ---------------------------------------------------------
 // Helper functions for executing blocks and updating state
 

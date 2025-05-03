@@ -30,7 +30,6 @@ type Application interface {
 	Commit(ctx context.Context, req *CommitRequest) (*CommitResponse, error)
 
 	// Check if two blocks are commutative
-	CheckBlocksCommute(ctx context.Context, blocks [][][]byte) (bool, error)
 
 	// State Sync Connection
 	ListSnapshots(ctx context.Context, req *ListSnapshotsRequest) (*ListSnapshotsResponse, error)                // List available snapshots
@@ -121,8 +120,4 @@ func (BaseApplication) FinalizeBlock(_ context.Context, req *FinalizeBlockReques
 	return &FinalizeBlockResponse{
 		TxResults: txs,
 	}, nil
-}
-
-func (BaseApplication) CheckBlocksCommute(_ context.Context, _ [][][]byte) (bool, error) {
-	return false, nil
 }
