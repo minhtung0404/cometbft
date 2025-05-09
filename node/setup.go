@@ -340,6 +340,7 @@ func createConsensusReactor(config *cfg.Config,
 	consensusLogger log.Logger,
 	offlineStateSyncHeight int64,
 ) (*cs.Reactor, *cs.State) {
+	consensusLogger.Info("Creating consensus reactor", "NStates", NStates)
 	var consensusStates = [NStates]*cs.State{}
 	for i := 0; i < NStates; i++ {
 		consensusStates[i] = cs.NewState(

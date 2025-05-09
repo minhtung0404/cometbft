@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
 	"sort"
 	"time"
@@ -57,7 +58,22 @@ func Benchmark(ctx context.Context, testnet *e2e.Testnet, benchmarkLength int64)
 	testnetStats.endHeight = blocks[len(blocks)-1].Header.Height
 
 	// print and return
-	logger.Info(testnetStats.OutputJSON(testnet))
+
+	testnetJSON := testnetStats.OutputJSON(testnet)
+
+	// appending this to file
+	benchmarkFile, err := os.OpenFile("benchmark.txt", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		logger.Error("Failed to open benchmark file", "err", err)
+	}
+	if _, err := benchmarkFile.WriteString(testnetJSON + "\n"); err != nil {
+		logger.Error("Failed to write to benchmark file", "err", err)
+	}
+	if err := benchmarkFile.Close(); err != nil {
+		logger.Error("Failed to close benchmark file", "err", err)
+	}
+
+	logger.Info(testnetJSON)
 	return nil
 }
 
