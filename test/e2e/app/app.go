@@ -42,8 +42,6 @@ const (
 	suffixPbtsHeight    string = "PbtsHeight"
 	suffixInitialHeight string = "InitialHeight"
 	txTTL               uint64 = 5 // height difference at which transactions should be invalid
-
-	NStates = 2
 )
 
 // Application is an ABCI application for use by end-to-end tests. It is a
@@ -136,6 +134,8 @@ type Config struct {
 	// -1 denotes it is set at genesis.
 	// 0 denotes it is set at InitChain.
 	PbtsUpdateHeight int64 `toml:"pbts_update_height"`
+
+	NStates int `toml:"n_states"`
 }
 
 func DefaultConfig(dir string) *Config {
@@ -143,6 +143,7 @@ func DefaultConfig(dir string) *Config {
 		PersistInterval:  1,
 		SnapshotInterval: 100,
 		Dir:              dir,
+		NStates:          2,
 	}
 }
 
@@ -228,6 +229,7 @@ func (app *Application) InitChain(_ context.Context, req *abci.InitChainRequest)
 			return nil, err
 		}
 	}
+	app.logger.Info("starting with num states", "NStates", app.cfg.NStates)
 	app.logger.Info("setting ChainID in app_state", "chainId", req.ChainId)
 	app.state.Set(prefixReservedKey+suffixChainID, req.ChainId)
 	app.logger.Info("setting VoteExtensionsHeight in app_state", "height", req.ConsensusParams.Feature.VoteExtensionsEnableHeight.GetValue())
@@ -779,7 +781,7 @@ func (app *Application) getAppHeight() int64 {
 
 func (app *Application) checkHeightAndExtensions(isPrepareProcessProposal bool, height int64, callsite string) (int64, bool) {
 	appHeight := app.getAppHeight()
-	if height >= appHeight+NStates {
+	if height >= appHeight+int64(app.cfg.NStates) {
 		panic(fmt.Errorf(
 			"got unexpected height in %s request; expected %d, actual %d",
 			callsite, appHeight, height,

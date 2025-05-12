@@ -2,12 +2,16 @@ prepare_proposal_delay = "100ms"
 process_proposal_delay = "100ms"
 check_tx_delay = "0ms"
 finalize_block_delay = "100ms"
+n_states = 2
 
 [node.validator00]
 zone = "Canada"
+
 [node.validator01]
 zone = "Ireland"
+
 [node.validator02]
 zone = "Tokyo"
+
 [node.validator03]
 zone = "N_California"

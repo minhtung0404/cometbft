@@ -17,10 +17,6 @@ import (
 	"github.com/cometbft/cometbft/types"
 )
 
-const (
-	NStates = 2
-)
-
 // Reactor handles mempool tx broadcasting amongst peers.
 // It maintains a map from peer ID to counter, to prevent gossiping txs to the
 // peers you received it from.
@@ -215,7 +211,7 @@ func (memR *Reactor) broadcastTxRoutine(peer p2p.Peer) {
 	// set once and never unset.
 	for {
 		// DEBUG Epochs: Ignore optimization for the moment
-		if ps, ok := peer.Get(types.PeerStateKey).([NStates]PeerState); ok {
+		if ps, ok := peer.Get(types.PeerStateKey).([]PeerState); ok {
 			_ = ps
 			break
 		}

@@ -71,6 +71,12 @@ func AddNodeFlags(cmd *cobra.Command) {
 		config.Consensus.CreateEmptyBlocksInterval.String(),
 		"the possible interval between empty blocks")
 
+	cmd.Flags().Int(
+		"consensus.n_states",
+		config.Consensus.NStates,
+		"number of consensus states per validator",
+	)
+
 	// db flags
 	cmd.Flags().String(
 		"db_backend",

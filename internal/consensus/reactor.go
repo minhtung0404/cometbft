@@ -33,8 +33,6 @@ const (
 
 	blocksToContributeToBecomeGoodPeer = 10000
 	votesToContributeToBecomeGoodPeer  = 10000
-
-	NStates = 2
 )
 
 // -----------------------------------------------------------------------------
@@ -43,28 +41,31 @@ const (
 type Reactor struct {
 	p2p.BaseReactor // BaseService + p2p.Switch
 
-	conS [NStates]*State
+	conS []*State
 
 	waitSync atomic.Bool
 	eventBus *types.EventBus
 
-	rsMtx [NStates]cmtsync.RWMutex
-	rs    [NStates]*cstypes.RoundState
+	rsMtx []cmtsync.RWMutex
+	rs    []*cstypes.RoundState
 	// TODO: remove initialHeight and use rs[conIdx].InitialHeight
-	initialHeight [NStates]int64 // under rsMtx
+	initialHeight []int64 // under rsMtx
 
 	Metrics *Metrics
+
+	NStates int // number of consensus states
 }
 
 type ReactorOption func(*Reactor)
 
 // NewReactor returns a new Reactor with the given consensusState.
-func NewReactor(consensusState [NStates]*State, waitSync bool, options ...ReactorOption) *Reactor {
-	conS := [NStates]*State{}
-	rs := [NStates]*cstypes.RoundState{}
-	initialHeight := [NStates]int64{}
-	barrier := NewBarrier()
-	commBarrier := NewCommutativityBarrier(consensusState[0].blockExec)
+func NewReactor(consensusState []*State, waitSync bool, NStates int, options ...ReactorOption) *Reactor {
+	conS := make([]*State, NStates)
+	rs := make([]*cstypes.RoundState, NStates)
+	initialHeight := make([]int64, NStates)
+	rsMtx := make([]cmtsync.RWMutex, NStates)
+	barrier := NewBarrier(NStates)
+	commBarrier := NewCommutativityBarrier(consensusState[0].blockExec, NStates)
 
 	for i := 0; i < NStates; i++ {
 		conS[i] = consensusState[i]
@@ -80,9 +81,11 @@ func NewReactor(consensusState [NStates]*State, waitSync bool, options ...Reacto
 	conR := &Reactor{
 		conS:          conS,
 		waitSync:      atomic.Bool{},
+		rsMtx:         rsMtx,
 		rs:            rs,
 		initialHeight: initialHeight,
 		Metrics:       NopMetrics(),
+		NStates:       NStates,
 	}
 	conR.BaseReactor = *p2p.NewBaseReactor("Consensus", conR)
 	if waitSync {
@@ -104,17 +107,17 @@ func (conR *Reactor) OnStart() error {
 	}
 
 	// start routine that computes peer statistics for evaluating peer quality
-	for i := 0; i < NStates; i++ {
+	for i := 0; i < conR.NStates; i++ {
 		go conR.peerStatsRoutine(i)
 	}
 
 	conR.subscribeToBroadcastEvents()
-	for i := 0; i < NStates; i++ {
+	for i := 0; i < conR.NStates; i++ {
 		go conR.updateRoundStateRoutine(i)
 	}
 
 	if !conR.WaitSync() {
-		for i := 0; i < NStates; i++ {
+		for i := 0; i < conR.NStates; i++ {
 			err := conR.conS[i].Start()
 			if err != nil {
 				return err
@@ -129,13 +132,13 @@ func (conR *Reactor) OnStart() error {
 // state.
 func (conR *Reactor) OnStop() {
 	conR.unsubscribeFromBroadcastEvents()
-	for i := 0; i < NStates; i++ {
+	for i := 0; i < conR.NStates; i++ {
 		if err := conR.conS[i].Stop(); err != nil {
 			conR.Logger.Error("Error stopping consensus state", "err", err)
 		}
 	}
 	if !conR.WaitSync() {
-		for i := 0; i < NStates; i++ {
+		for i := 0; i < conR.NStates; i++ {
 			conR.conS[i].Wait()
 		}
 	}
@@ -162,7 +165,7 @@ func (conR *Reactor) SwitchToConsensus(state sm.State, skipWAL bool) {
 		conR.conS[conIdx].updateToState(state)
 	}
 
-	for i := 0; i < NStates; i++ {
+	for i := 0; i < conR.NStates; i++ {
 		reset(i)
 
 		// stop waiting for syncing to finish
@@ -227,8 +230,8 @@ func (*Reactor) GetChannels() []*p2p.ChannelDescriptor {
 
 // InitPeer implements Reactor by creating a state for the peer.
 func (conR *Reactor) InitPeer(peer p2p.Peer) p2p.Peer {
-	peerStates := [NStates]*PeerState{}
-	for i := 0; i < NStates; i++ {
+	peerStates := make([]*PeerState, conR.NStates)
+	for i := 0; i < conR.NStates; i++ {
 		peerStates[i] = NewPeerState(peer).SetLogger(conR.Logger)
 	}
 	peer.Set(types.PeerStateKey, peerStates)
@@ -242,12 +245,12 @@ func (conR *Reactor) AddPeer(peer p2p.Peer) {
 		return
 	}
 
-	peerState, ok := peer.Get(types.PeerStateKey).([NStates]*PeerState)
+	peerState, ok := peer.Get(types.PeerStateKey).([]*PeerState)
 	if !ok {
 		panic(fmt.Sprintf("peer %v has no state", peer))
 	}
 	// Begin routines for this peer.
-	for i := 0; i < NStates; i++ {
+	for i := 0; i < conR.NStates; i++ {
 		go conR.gossipDataRoutine(i, peer, peerState[i])
 		go conR.gossipVotesRoutine(i, peer, peerState[i])
 		go conR.queryMaj23Routine(i, peer, peerState[i])
@@ -275,6 +278,7 @@ func (conR *Reactor) RemovePeer(p2p.Peer, any) {
 
 // Finding the consensus instance index by height.
 func (conR *Reactor) getConIndex(msg Message) int64 {
+	NStates := int64(conR.NStates)
 	switch msg := msg.(type) {
 	case *NewRoundStepMessage:
 		return (msg.Height - 1) % NStates
@@ -328,7 +332,7 @@ func (conR *Reactor) Receive(e p2p.Envelope) {
 	conR.Logger.Debug("Receive", "src", e.Src, "chId", e.ChannelID, "msg", msg)
 
 	// Get peer states
-	pss, ok := e.Src.Get(types.PeerStateKey).([NStates]*PeerState)
+	pss, ok := e.Src.Get(types.PeerStateKey).([]*PeerState)
 	if !ok {
 		panic(fmt.Sprintf("Peer %v has no state", e.Src))
 	}
@@ -343,7 +347,7 @@ func (conR *Reactor) Receive(e p2p.Envelope) {
 			conR.rsMtx[conIdx].RLock()
 			initialHeight := conR.initialHeight[conIdx]
 			conR.rsMtx[conIdx].RUnlock()
-			if err = msg.ValidateHeight(initialHeight); err != nil {
+			if err = msg.ValidateHeight(initialHeight, conR.NStates); err != nil {
 				conR.Logger.Error("Peer sent us invalid msg", "peer", e.Src, "msg", msg, "err", err)
 				conR.Switch.StopPeerForError(e.Src, err)
 				return
@@ -485,7 +489,7 @@ func (conR *Reactor) Receive(e p2p.Envelope) {
 // SetEventBus sets event bus.
 func (conR *Reactor) SetEventBus(b *types.EventBus) {
 	conR.eventBus = b
-	for i := 0; i < NStates; i++ {
+	for i := 0; i < conR.NStates; i++ {
 		conR.conS[i].SetEventBus(b)
 	}
 }
@@ -502,7 +506,7 @@ func (conR *Reactor) WaitSync() bool {
 // them to peers upon receiving.
 func (conR *Reactor) subscribeToBroadcastEvents() {
 	const subscriber = "consensus-reactor"
-	for i := 0; i < NStates; i++ {
+	for i := 0; i < conR.NStates; i++ {
 		if err := conR.conS[i].evsw.AddListenerForEvent(subscriber, types.EventNewRoundStep,
 			func(data cmtevents.EventData) {
 				conR.broadcastNewRoundStepMessage(data.(*cstypes.RoundState))
@@ -538,7 +542,7 @@ func (conR *Reactor) subscribeToBroadcastEvents() {
 
 func (conR *Reactor) unsubscribeFromBroadcastEvents() {
 	const subscriber = "consensus-reactor"
-	for i := 0; i < NStates; i++ {
+	for i := 0; i < conR.NStates; i++ {
 		conR.conS[i].evsw.RemoveListener(subscriber)
 	}
 }
@@ -637,7 +641,7 @@ func makeRoundStepMessage(rs *cstypes.RoundState) (nrsMsg *cmtcons.NewRoundStep)
 
 func (conR *Reactor) sendNewRoundStepMessage(peer p2p.Peer) {
 	rs := conR.getRoundState()
-	for i := 0; i < NStates; i++ {
+	for i := 0; i < conR.NStates; i++ {
 		nrsMsg := makeRoundStepMessage(rs[i])
 		peer.Send(p2p.Envelope{
 			ChannelID: StateChannel,
@@ -668,9 +672,9 @@ func (conR *Reactor) updateRoundStateNoCsLock(conIdx int) {
 	conR.rsMtx[conIdx].Unlock()
 }
 
-func (conR *Reactor) getRoundState() [NStates]*cstypes.RoundState {
-	rs := [NStates]*cstypes.RoundState{}
-	for i := 0; i < NStates; i++ {
+func (conR *Reactor) getRoundState() []*cstypes.RoundState {
+	rs := make([]*cstypes.RoundState, conR.NStates)
+	for i := 0; i < conR.NStates; i++ {
 		conR.rsMtx[i].Lock()
 		rs[i] = conR.rs[i]
 		conR.rsMtx[i].Unlock()
@@ -772,7 +776,7 @@ OUTER_LOOP:
 		// logger.Debug("gossipVotesRoutine", "rsHeight", rs.Height, "rsRound", rs.Round,
 		// "prsHeight", prs.Height, "prsRound", prs.Round, "prsStep", prs.Step)
 
-		if vote := pickVoteToSend(logger, conR.conS[conIdx], rs, ps, prs, rng); vote != nil {
+		if vote := pickVoteToSend(logger, conR.conS[conIdx], rs, ps, prs, rng, conR.NStates); vote != nil {
 			if ps.sendVoteSetHasVote(vote) {
 				continue OUTER_LOOP
 			}
@@ -984,6 +988,7 @@ func pickVoteToSend(
 	ps *PeerState,
 	prs *cstypes.PeerRoundState,
 	rng *rand.Rand,
+	NStates int,
 ) *types.Vote {
 	// If height matches, then send LastCommit, Prevotes, Precommits.
 	if rs.Height == prs.Height {
@@ -993,7 +998,7 @@ func pickVoteToSend(
 
 	// Special catchup logic.
 	// If peer is lagging by height 1, send LastCommit.
-	if prs.Height != 0 && rs.Height <= prs.Height+NStates {
+	if prs.Height != 0 && rs.Height <= prs.Height+int64(NStates) {
 		if vote := ps.PickVoteToSend(rs.LastCommit, rng); vote != nil {
 			logger.Debug("Picked rs.LastCommit to send", "height", prs.Height)
 			return vote
@@ -1003,7 +1008,7 @@ func pickVoteToSend(
 	// Catchup logic
 	// If peer is lagging by more than 1, send Commit.
 	blockStoreBase := conS.blockStore.Base()
-	if blockStoreBase > 0 && prs.Height != 0 && rs.Height > prs.Height+NStates && prs.Height >= blockStoreBase {
+	if blockStoreBase > 0 && prs.Height != 0 && rs.Height > prs.Height+int64(NStates) && prs.Height >= blockStoreBase {
 		// Load the block's extended commit for prs.Height,
 		// which contains precommit signatures for prs.Height.
 		var ec *types.ExtendedCommit
@@ -1111,7 +1116,7 @@ func (conR *Reactor) peerStatsRoutine(conIdx int) {
 				continue
 			}
 			// Get peer state
-			ps, ok := peer.Get(types.PeerStateKey).([NStates]*PeerState)
+			ps, ok := peer.Get(types.PeerStateKey).([]*PeerState)
 			if !ok {
 				panic(fmt.Sprintf("Peer %v has no state", peer))
 			}
@@ -1147,7 +1152,7 @@ func (conR *Reactor) StringIndented(indent string) string {
 	s := "ConsensusReactor{\n"
 	s += indent + "  " + conR.conS[0].StringIndented(indent+"  ") + "\n"
 	conR.Switch.Peers().ForEach(func(peer p2p.Peer) {
-		ps, ok := peer.Get(types.PeerStateKey).([NStates]*PeerState)
+		ps, ok := peer.Get(types.PeerStateKey).([]*PeerState)
 		if !ok {
 			panic(fmt.Sprintf("Peer %v has no state", peer))
 		}
@@ -1796,7 +1801,7 @@ func (m *NewRoundStepMessage) ValidateBasic() error {
 }
 
 // ValidateHeight validates the height given the chain's initial height.
-func (m *NewRoundStepMessage) ValidateHeight(initialHeight int64) error {
+func (m *NewRoundStepMessage) ValidateHeight(initialHeight int64, NStates int) error {
 	if m.Height < initialHeight {
 		return cmterrors.ErrInvalidField{
 			Field:  "Height",
@@ -1811,7 +1816,7 @@ func (m *NewRoundStepMessage) ValidateHeight(initialHeight int64) error {
 		}
 	}
 
-	if m.Height >= initialHeight+NStates && m.LastCommitRound < 0 {
+	if m.Height >= initialHeight+int64(NStates) && m.LastCommitRound < 0 {
 		return cmterrors.ErrInvalidField{
 			Field:  "LastCommitRound",
 			Reason: fmt.Sprintf("can only be negative for initial height %v", initialHeight),

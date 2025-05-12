@@ -135,6 +135,9 @@ type Manifest struct {
 	// -1 denotes it is set at genesis.
 	// 0 denotes it is set at InitChain.
 	PbtsUpdateHeight int64 `toml:"pbts_update_height"`
+
+	// NStates specifies the number of consensus states to be used in each node of the testnet.
+	NStates int `toml:"n_states"`
 }
 
 // ManifestNode represents a node in a testnet manifest.
@@ -236,6 +239,8 @@ type ManifestNode struct {
 
 	// Simulated clock skew for this node
 	ClockSkew time.Duration `toml:"clock_skew"`
+
+	NStates int `toml:"n_states"`
 }
 
 // Save saves the testnet manifest to a file.

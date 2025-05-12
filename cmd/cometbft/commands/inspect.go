@@ -40,6 +40,8 @@ func init() {
 			config.DBBackend, "database backend: goleveldb | rocksdb | badgerdb | pebbledb")
 	InspectCmd.Flags().
 		String("db-dir", config.DBPath, "database directory")
+	InspectCmd.Flags().
+		Int("n-states", config.Consensus.NStates, "number of consensus state per layer")
 }
 
 func runInspect(cmd *cobra.Command, _ []string) error {
@@ -50,7 +52,7 @@ func runInspect(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	blockStore := store.NewBlockStore(blockStoreDB, store.WithDBKeyLayout(config.Storage.ExperimentalKeyLayout))
+	blockStore := store.NewBlockStore(blockStoreDB, config.Consensus.NStates, store.WithDBKeyLayout(config.Storage.ExperimentalKeyLayout))
 	defer blockStore.Close()
 
 	stateDB, err := cfg.DefaultDBProvider(&cfg.DBContext{ID: "state", Config: config})

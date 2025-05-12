@@ -207,10 +207,12 @@ type Handshaker struct {
 	logger       log.Logger
 
 	nBlocks int // number of blocks applied to the state
+
+	NStates int
 }
 
 func NewHandshaker(stateStore sm.Store, state sm.State,
-	store sm.BlockStore, genDoc *types.GenesisDoc,
+	store sm.BlockStore, genDoc *types.GenesisDoc, NStates int,
 ) *Handshaker {
 	return &Handshaker{
 		stateStore:   stateStore,
@@ -220,6 +222,7 @@ func NewHandshaker(stateStore sm.Store, state sm.State,
 		genDoc:       genDoc,
 		logger:       log.NewNopLogger(),
 		nBlocks:      0,
+		NStates:      NStates,
 	}
 }
 
@@ -491,7 +494,7 @@ func (h *Handshaker) replayBlocks(
 			assertAppHashEqualsOneFromBlock(appHash, block)
 		}
 
-		appHash, err = sm.ExecCommitBlock(proxyApp.Consensus(), block, h.logger, h.stateStore, h.genDoc.InitialHeight, storeBlockHeight)
+		appHash, err = sm.ExecCommitBlock(proxyApp.Consensus(), block, h.logger, h.stateStore, h.genDoc.InitialHeight, storeBlockHeight, h.NStates)
 		if err != nil {
 			return nil, err
 		}
@@ -518,7 +521,7 @@ func (h *Handshaker) replayBlock(state sm.State, height int64, proxyApp proxy.Ap
 
 	// Use stubs for both mempool and evidence pool since no transactions nor
 	// evidence are needed here - block already exists.
-	blockExec := sm.NewBlockExecutor(h.stateStore, h.logger, proxyApp, emptyMempool{}, sm.EmptyEvidencePool{}, h.store)
+	blockExec := sm.NewBlockExecutor(h.stateStore, h.logger, proxyApp, emptyMempool{}, sm.EmptyEvidencePool{}, h.store, h.NStates)
 	blockExec.SetEventBus(h.eventBus)
 
 	var err error

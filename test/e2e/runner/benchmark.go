@@ -113,6 +113,7 @@ func (t *testnetStats) OutputJSON(net *e2e.Testnet) string {
 		"size":         len(net.Nodes),
 		"txns":         t.numtxns,
 		"dur":          t.totalTime.Seconds(),
+		"n_states":     net.NStates,
 	})
 	if err != nil {
 		return ""

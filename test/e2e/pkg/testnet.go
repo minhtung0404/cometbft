@@ -108,6 +108,7 @@ type Testnet struct {
 	DefaultZone                                          string
 	PbtsEnableHeight                                     int64
 	PbtsUpdateHeight                                     int64
+	NStates                                              int
 }
 
 // Node represents a CometBFT node in a testnet.
@@ -146,6 +147,7 @@ type Node struct {
 	DiscardABCIResponses    bool
 	Indexer                 string
 	ClockSkew               time.Duration
+	NStates                 int
 }
 
 // LoadTestnet loads a testnet from a manifest file. The testnet files are
@@ -211,6 +213,7 @@ func NewTestnetFromManifest(manifest Manifest, file string, ifd InfrastructureDa
 		DefaultZone:      manifest.DefaultZone,
 		PbtsEnableHeight: manifest.PbtsEnableHeight,
 		PbtsUpdateHeight: manifest.PbtsUpdateHeight,
+		NStates:          manifest.NStates,
 	}
 	if len(manifest.KeyType) != 0 {
 		testnet.KeyType = manifest.KeyType

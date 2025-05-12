@@ -333,6 +333,7 @@ func MakeAppConfig(node *e2e.Node) ([]byte, error) {
 		"abci_requests_logging_enabled": node.Testnet.ABCITestsEnabled,
 		"pbts_enable_height":            node.Testnet.PbtsEnableHeight,
 		"pbts_update_height":            node.Testnet.PbtsUpdateHeight,
+		"n_states":                      node.Testnet.NStates,
 	}
 	switch node.ABCIProtocol {
 	case e2e.ProtocolUNIX:

@@ -49,6 +49,8 @@ type BlockExecutor struct {
 	logger log.Logger
 
 	metrics *Metrics
+
+	NStates int
 }
 
 type BlockExecutorOption func(executor *BlockExecutor)
@@ -74,6 +76,7 @@ func NewBlockExecutor(
 	mempool mempool.Mempool,
 	evpool EvidencePool,
 	blockStore BlockStore,
+	NStates int,
 	options ...BlockExecutorOption,
 ) *BlockExecutor {
 	res := &BlockExecutor{
@@ -85,6 +88,7 @@ func NewBlockExecutor(
 		logger:     logger,
 		metrics:    NopMetrics(),
 		blockStore: blockStore,
+		NStates:    NStates,
 	}
 
 	for _, option := range options {
@@ -136,7 +140,7 @@ func (blockExec *BlockExecutor) CreateProposalBlock(
 
 	txs := blockExec.mempool.ReapMaxBytesMaxGas(maxReapBytes, maxGas)
 	commit := lastExtCommit.ToCommit()
-	block := state.MakeBlock(height, txs, commit, evidence, proposerAddr)
+	block := state.MakeBlock(height, txs, commit, evidence, proposerAddr, blockExec.NStates)
 	rpp, err := blockExec.proxyApp.PrepareProposal(
 		ctx,
 		&abci.PrepareProposalRequest{
@@ -167,7 +171,7 @@ func (blockExec *BlockExecutor) CreateProposalBlock(
 		return nil, err
 	}
 
-	return state.MakeBlock(height, txl, commit, evidence, proposerAddr), nil
+	return state.MakeBlock(height, txl, commit, evidence, proposerAddr, blockExec.NStates), nil
 }
 
 func (blockExec *BlockExecutor) ProcessProposal(
@@ -179,7 +183,7 @@ func (blockExec *BlockExecutor) ProcessProposal(
 		Height:             block.Header.Height,
 		Time:               block.Header.Time,
 		Txs:                block.Data.Txs.ToSliceOfBytes(),
-		ProposedLastCommit: buildLastCommitInfoFromStore(block, blockExec.store, state.InitialHeight),
+		ProposedLastCommit: buildLastCommitInfoFromStore(block, blockExec.store, state.InitialHeight, int64(blockExec.NStates)),
 		Misbehavior:        block.Evidence.Evidence.ToABCI(),
 		ProposerAddress:    block.ProposerAddress,
 		NextValidatorsHash: block.NextValidatorsHash,
@@ -202,7 +206,7 @@ func (blockExec *BlockExecutor) ValidateBlock(state State, block *types.Block) e
 	// DEBUG: temporarily disable validation
 	return nil
 	if !blockExec.lastValidatedBlock.HashesTo(block.Hash()) {
-		if err := validateBlock(state, block); err != nil {
+		if err := validateBlock(state, block, int64(blockExec.NStates)); err != nil {
 			return err
 		}
 		blockExec.lastValidatedBlock = block
@@ -227,7 +231,7 @@ func (blockExec *BlockExecutor) ApplyBlock(
 	state State, blockID types.BlockID, block *types.Block, syncingToHeight int64,
 ) (State, error) {
 	if !blockExec.lastValidatedBlock.HashesTo(block.Hash()) {
-		if err := validateBlock(state, block); err != nil {
+		if err := validateBlock(state, block, int64(blockExec.NStates)); err != nil {
 			return state, ErrInvalidBlock(err)
 		}
 		blockExec.lastValidatedBlock = block
@@ -243,7 +247,7 @@ func (blockExec *BlockExecutor) applyBlock(state State, blockID types.BlockID, b
 		ProposerAddress:    block.ProposerAddress,
 		Height:             block.Height,
 		Time:               block.Time,
-		DecidedLastCommit:  buildLastCommitInfoFromStore(block, blockExec.store, state.InitialHeight),
+		DecidedLastCommit:  buildLastCommitInfoFromStore(block, blockExec.store, state.InitialHeight, int64(blockExec.NStates)),
 		Misbehavior:        block.Evidence.Evidence.ToABCI(),
 		Txs:                block.Txs.ToSliceOfBytes(),
 		SyncingToHeight:    syncingToHeight,
@@ -365,7 +369,7 @@ func (blockExec *BlockExecutor) ExtendVote(
 		Height:             vote.Height,
 		Time:               block.Time,
 		Txs:                block.Txs.ToSliceOfBytes(),
-		ProposedLastCommit: buildLastCommitInfoFromStore(block, blockExec.store, state.InitialHeight),
+		ProposedLastCommit: buildLastCommitInfoFromStore(block, blockExec.store, state.InitialHeight, int64(blockExec.NStates)),
 		Misbehavior:        block.Evidence.Evidence.ToABCI(),
 		NextValidatorsHash: block.NextValidatorsHash,
 		ProposerAddress:    block.ProposerAddress,
@@ -480,7 +484,7 @@ func (blockExec *BlockExecutor) asyncUpdateMempool(
 // ---------------------------------------------------------
 // Helper functions for executing blocks and updating state
 
-func buildLastCommitInfoFromStore(block *types.Block, store Store, initialHeight int64) abci.CommitInfo {
+func buildLastCommitInfoFromStore(block *types.Block, store Store, initialHeight int64, NStates int64) abci.CommitInfo {
 	if block.Height < initialHeight+NStates { // check for initial height before loading validators
 		// there is no last commit for the initial height.
 		// return an empty value.
@@ -785,9 +789,9 @@ func ExecCommitBlock(
 	block *types.Block,
 	logger log.Logger,
 	store Store,
-	initialHeight, finalHeight int64,
+	initialHeight, finalHeight int64, NStates int,
 ) ([]byte, error) {
-	commitInfo := buildLastCommitInfoFromStore(block, store, initialHeight)
+	commitInfo := buildLastCommitInfoFromStore(block, store, initialHeight, int64(NStates))
 
 	resp, err := appConnConsensus.FinalizeBlock(context.TODO(), &abci.FinalizeBlockRequest{
 		Hash:               block.Hash(),
