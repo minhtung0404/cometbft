@@ -136,8 +136,11 @@ type Manifest struct {
 	// 0 denotes it is set at InitChain.
 	PbtsUpdateHeight int64 `toml:"pbts_update_height"`
 
-	// NStates specifies the number of consensus states to be used in each node of the testnet.
+	// NStates specifies the number of consensus states to be used in each node of the testnet
 	NStates int `toml:"n_states"`
+
+	// LoadRate specifies the rate at which transactions are sent to the node(s)
+	LoadRate time.Duration `toml:"load_rate"`
 }
 
 // ManifestNode represents a node in a testnet manifest.

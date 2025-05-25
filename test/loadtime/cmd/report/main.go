@@ -19,6 +19,7 @@ var (
 	dir     = flag.String("data-dir", "", "path to the directory containing the CometBFT databases")
 	csvOut  = flag.String("csv", "", "dump the extracted latencies as raw csv for use in additional tooling")
 	oneline = flag.Bool("oneline", false, "display the results in one line of comma-separated values")
+	nstates = flag.Int("nstates", 1, "number of consensus states per layer (default 1)")
 )
 
 func main() {
@@ -46,7 +47,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	s := store.NewBlockStore(db)
+	s := store.NewBlockStore(db, *nstates)
 	defer s.Close()
 	rs, err := report.GenerateFromBlockStore(s)
 	if err != nil {
