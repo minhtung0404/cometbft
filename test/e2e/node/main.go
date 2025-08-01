@@ -136,6 +136,7 @@ func startNode(cfg *Config) error {
 	if cfg.ExperimentalKeyLayout != "" {
 		cmtcfg.Storage.ExperimentalKeyLayout = cfg.ExperimentalKeyLayout
 	}
+	cmtcfg.Consensus.NStates = cfg.NStates
 
 	n, err := node.NewNode(context.Background(), cmtcfg,
 		privval.LoadOrGenFilePV(cmtcfg.PrivValidatorKeyFile(), cmtcfg.PrivValidatorStateFile()),

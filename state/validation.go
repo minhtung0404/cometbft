@@ -14,11 +14,7 @@ import (
 // -----------------------------------------------------
 // Validate block
 
-const (
-	NStates = 2
-)
-
-func validateBlock(state State, block *types.Block) error {
+func validateBlock(state State, block *types.Block, NStates int64) error {
 	// Validate internal consistency.
 	if err := block.ValidateBasic(); err != nil {
 		return err

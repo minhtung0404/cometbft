@@ -41,8 +41,6 @@ import (
 
 const (
 	readHeaderTimeout = 10 * time.Second
-
-	NStates = 2
 )
 
 // ChecksummedGenesisDoc combines a GenesisDoc together with its
@@ -200,8 +198,9 @@ func doHandshake(
 	eventBus types.BlockEventPublisher,
 	proxyApp proxy.AppConns,
 	consensusLogger log.Logger,
+	NStates int,
 ) error {
-	handshaker := cs.NewHandshaker(stateStore, state, blockStore, genDoc)
+	handshaker := cs.NewHandshaker(stateStore, state, blockStore, genDoc, NStates)
 	handshaker.SetLogger(consensusLogger)
 	handshaker.SetEventBus(eventBus)
 	if err := handshaker.Handshake(ctx, proxyApp); err != nil {
@@ -340,8 +339,9 @@ func createConsensusReactor(config *cfg.Config,
 	consensusLogger log.Logger,
 	offlineStateSyncHeight int64,
 ) (*cs.Reactor, *cs.State) {
-	var consensusStates = [NStates]*cs.State{}
-	for i := 0; i < NStates; i++ {
+	consensusLogger.Info("Creating consensus reactor", "NStates", config.Consensus.NStates)
+	var consensusStates = make([]*cs.State, config.Consensus.NStates)
+	for i := 0; i < config.Consensus.NStates; i++ {
 		consensusStates[i] = cs.NewState(
 			config.Consensus,
 			&state,
@@ -349,6 +349,7 @@ func createConsensusReactor(config *cfg.Config,
 			blockStore,
 			mempool,
 			evidencePool,
+			config.Consensus.NStates,
 			cs.StateMetrics(csMetrics),
 			cs.OfflineStateSyncHeight(offlineStateSyncHeight),
 			func(cs *cs.State) { cs.Idx = int64(i) },
@@ -361,7 +362,7 @@ func createConsensusReactor(config *cfg.Config,
 			consensusStates[i].SetPrivValidator(privval.LoadOrGenFilePV(config.PrivValidatorKeyFile(), config.PrivValidatorStateFile()))
 		}
 	}
-	consensusReactor := cs.NewReactor(consensusStates, waitSync, cs.ReactorMetrics(csMetrics))
+	consensusReactor := cs.NewReactor(consensusStates, waitSync, config.Consensus.NStates, cs.ReactorMetrics(csMetrics))
 	consensusReactor.SetLogger(consensusLogger)
 	// services which will be publishing and/or subscribing for messages (events)
 	// consensusReactor will set it on consensusState and blockExecutor

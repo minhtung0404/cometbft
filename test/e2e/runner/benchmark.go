@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	e2e "github.com/cometbft/cometbft/test/e2e/pkg"
@@ -56,7 +58,22 @@ func Benchmark(ctx context.Context, testnet *e2e.Testnet, benchmarkLength int64)
 	testnetStats.endHeight = blocks[len(blocks)-1].Header.Height
 
 	// print and return
-	logger.Info(testnetStats.OutputJSON(testnet))
+
+	testnetJSON := testnetStats.OutputJSON(testnet)
+
+	// appending this to file
+	benchmarkFile, err := os.OpenFile("benchmark.txt", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		logger.Error("Failed to open benchmark file", "err", err)
+	}
+	if _, err := benchmarkFile.WriteString(testnetJSON + "\n"); err != nil {
+		logger.Error("Failed to write to benchmark file", "err", err)
+	}
+	if err := benchmarkFile.Close(); err != nil {
+		logger.Error("Failed to close benchmark file", "err", err)
+	}
+
+	logger.Info(testnetJSON)
 	return nil
 }
 
@@ -96,6 +113,7 @@ func (t *testnetStats) OutputJSON(net *e2e.Testnet) string {
 		"size":         len(net.Nodes),
 		"txns":         t.numtxns,
 		"dur":          t.totalTime.Seconds(),
+		"n_states":     net.NStates,
 	})
 	if err != nil {
 		return ""
@@ -171,6 +189,10 @@ func fetchBlockChainSample(ctx context.Context, testnet *e2e.Testnet, benchmarkL
 
 func splitIntoBlockIntervals(blocks []*types.BlockMeta) []time.Duration {
 	intervals := make([]time.Duration, len(blocks)-1)
+	// sort the blocks by Header.Time
+	sort.Slice(blocks, func(i, j int) bool {
+		return blocks[i].Header.Time.Before(blocks[j].Header.Time)
+	})
 	lastTime := blocks[0].Header.Time
 	for i, block := range blocks {
 		// skip the first block

@@ -600,7 +600,7 @@ func (mem *CListMempool) Update(
 		//   100
 		// https://github.com/tendermint/tendermint/issues/3322.
 		if err := mem.RemoveTxByKey(tx.Key()); err != nil {
-			mem.logger.Debug("Committed transaction not in local mempool (not an error)",
+			mem.logger.Info("Committed transaction not in local mempool (not an error)",
 				"tx", tx.Hash(),
 				"error", err.Error())
 		}

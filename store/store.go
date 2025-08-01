@@ -70,6 +70,8 @@ type BlockStore struct {
 	blockCommitCache         *lru.Cache[int64, *types.Commit]
 	blockExtendedCommitCache *lru.Cache[int64, *types.ExtendedCommit]
 	blockPartCache           *lru.Cache[blockPartIndex, *types.Part]
+
+	NStates int
 }
 
 type BlockStoreOption func(*BlockStore)
@@ -121,7 +123,7 @@ func setDBLayout(bStore *BlockStore, dbKeyLayoutVersion string) {
 
 // NewBlockStore returns a new BlockStore with the given DB,
 // initialized to the last height that was committed to the DB.
-func NewBlockStore(db dbm.DB, options ...BlockStoreOption) *BlockStore {
+func NewBlockStore(db dbm.DB, NStates int, options ...BlockStoreOption) *BlockStore {
 	start := time.Now()
 
 	bs := LoadBlockStoreState(db)
@@ -131,6 +133,7 @@ func NewBlockStore(db dbm.DB, options ...BlockStoreOption) *BlockStore {
 		height:  bs.Height,
 		db:      db,
 		metrics: NopMetrics(),
+		NStates: NStates,
 	}
 	bStore.addCaches()
 
@@ -598,7 +601,7 @@ func (bs *BlockStore) SaveBlock(block *types.Block, blockParts *types.PartSet, s
 
 	bs.mtx.Lock()
 	defer bs.mtx.Unlock()
-	bs.height = block.Height
+	bs.height = max(bs.height, block.Height)
 	if bs.base == 0 {
 		bs.base = block.Height
 	}
@@ -675,9 +678,9 @@ func (bs *BlockStore) saveBlockToBatch(
 	height := block.Height
 	hash := block.Hash()
 
-	if g, w := height, bs.Height()+1; bs.Base() > 0 && g != w {
-		return fmt.Errorf("BlockStore can only save contiguous blocks. Wanted %v, got %v", w, g)
-	}
+	// if g, w := height, bs.Height()+1; bs.Base() > 0 && g != w {
+	// 	return fmt.Errorf("BlockStore can only save contiguous blocks. Wanted %v, got %v", w, g)
+	// }
 	if !blockParts.IsComplete() {
 		return errors.New("BlockStore can only save complete block part sets")
 	}
@@ -725,7 +728,7 @@ func (bs *BlockStore) saveBlockToBatch(
 
 	blockMetaMarshallDiff += time.Since(marshallTime).Seconds()
 
-	if err := batch.Set(bs.dbKeyLayout.CalcBlockCommitKey(height-sm.NStates), blockCommitBytes); err != nil {
+	if err := batch.Set(bs.dbKeyLayout.CalcBlockCommitKey(height-int64(bs.NStates)), blockCommitBytes); err != nil {
 		return err
 	}
 

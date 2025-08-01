@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	mathrand "math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -41,8 +42,6 @@ const (
 	suffixPbtsHeight    string = "PbtsHeight"
 	suffixInitialHeight string = "InitialHeight"
 	txTTL               uint64 = 5 // height difference at which transactions should be invalid
-
-	NStates = 2
 )
 
 // Application is an ABCI application for use by end-to-end tests. It is a
@@ -135,6 +134,8 @@ type Config struct {
 	// -1 denotes it is set at genesis.
 	// 0 denotes it is set at InitChain.
 	PbtsUpdateHeight int64 `toml:"pbts_update_height"`
+
+	NStates int `toml:"n_states"`
 }
 
 func DefaultConfig(dir string) *Config {
@@ -142,6 +143,7 @@ func DefaultConfig(dir string) *Config {
 		PersistInterval:  1,
 		SnapshotInterval: 100,
 		Dir:              dir,
+		NStates:          2,
 	}
 }
 
@@ -227,6 +229,7 @@ func (app *Application) InitChain(_ context.Context, req *abci.InitChainRequest)
 			return nil, err
 		}
 	}
+	app.logger.Info("starting with num states", "NStates", app.cfg.NStates)
 	app.logger.Info("setting ChainID in app_state", "chainId", req.ChainId)
 	app.state.Set(prefixReservedKey+suffixChainID, req.ChainId)
 	app.logger.Info("setting VoteExtensionsHeight in app_state", "height", req.ConsensusParams.Feature.VoteExtensionsEnableHeight.GetValue())
@@ -305,10 +308,12 @@ func (app *Application) FinalizeBlock(_ context.Context, req *abci.FinalizeBlock
 	if err != nil {
 		return nil, err
 	}
+	app.logger.Info("starting to finalizing in app", "height", req.Height)
 
 	txs := make([]*abci.ExecTxResult, len(req.Txs))
 
 	for i, tx := range req.Txs {
+		app.logger.Info("starting to finalizing in app 2", "height", req.Height)
 		key, value, err := parseTx(tx)
 		if err != nil {
 			panic(err) // shouldn't happen since we verified it in CheckTx and ProcessProposal
@@ -317,6 +322,7 @@ func (app *Application) FinalizeBlock(_ context.Context, req *abci.FinalizeBlock
 			panic(fmt.Errorf("detected a transaction with key %q; this key is reserved and should have been filtered out", prefixReservedKey))
 		}
 		app.state.Set(key, value)
+		app.logger.Info("finalizing in app", "height", req.Height, "key", key, "value", value)
 
 		app.seenTxs.Delete(cmttypes.Tx(tx).Key())
 
@@ -546,6 +552,9 @@ func (app *Application) PrepareProposal(
 		// Coherence: No need to call parseTx, as the check is stateless and has been performed by CheckTx
 		totalBytes = extTxLen
 	}
+	mathrand.Shuffle(len(req.Txs), func(i, j int) {
+		req.Txs[i], req.Txs[j] = req.Txs[j], req.Txs[i]
+	})
 	for _, tx := range req.Txs {
 		if areExtensionsEnabled && strings.HasPrefix(string(tx), extTxPrefix) {
 			// When vote extensions are enabled, our generated transaction takes precedence
@@ -557,13 +566,14 @@ func (app *Application) PrepareProposal(
 			continue
 		}
 		txLen := cmttypes.ComputeProtoSizeForTxs([]cmttypes.Tx{tx})
-		if totalBytes+txLen > req.MaxTxBytes {
+		if totalBytes+txLen > req.MaxTxBytes || len(txs) >= 2 {
 			break
 		}
 		totalBytes += txLen
 		// Coherence: No need to call parseTx, as the check is stateless and has been performed by CheckTx
 		txs = append(txs, tx)
 	}
+	app.logger.Info("BRUH preparing proposal", "height", req.Height, "givenTxs", len(req.Txs), "realTxs", len(txs), "totalBytes", totalBytes, "maxTxBytes", req.MaxTxBytes)
 
 	if app.cfg.PrepareProposalDelay != 0 {
 		time.Sleep(app.cfg.PrepareProposalDelay)
@@ -701,6 +711,57 @@ func (app *Application) Rollback() error {
 	return app.state.Rollback()
 }
 
+func (app *Application) CheckBlocksCommutativity(_ context.Context, blocks [][][]byte) (bool, error) {
+	// r := &abci.Request{Value: &abci.Request_CheckBlockCommutativity{CheckBlockCommutativity: &abci.CheckBlockCommutativityRequest{}}}
+	// err := app.logABCIRequest(r)
+	// if err != nil {
+	// 	return false, err
+	// }
+
+	n := len(blocks)
+	// list of maps
+	valueList := make([]map[string]string, n)
+	for i := 0; i < n; i++ {
+		valueList[i] = make(map[string]string)
+		for _, tx := range blocks[i] {
+			key, value, err := parseTx(tx)
+			if err != nil {
+				return false, err
+			}
+			if key == prefixReservedKey {
+				return false, fmt.Errorf("detected a transaction with key %q; this key is reserved and should have been filtered out", prefixReservedKey)
+			}
+			valueList[i][key] = value
+		}
+	}
+
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			commute, err := app.checkBlockCommute(valueList[i], valueList[j])
+			if err != nil {
+				return false, err
+			}
+			if !commute {
+				return false, fmt.Errorf("blocks %d and %d do not commute", i, j)
+			}
+		}
+	}
+	return true, nil
+}
+
+func (app *Application) checkBlockCommute(block1 map[string]string, block2 map[string]string) (bool, error) {
+	commute := true
+	for key, value1 := range block1 {
+		if value2, ok := block2[key]; ok {
+			if value1 != value2 {
+				commute = false
+				break
+			}
+		}
+	}
+	return commute, nil
+}
+
 func (app *Application) getAppHeight() int64 {
 	initialHeightStr, height := app.state.Query(prefixReservedKey + suffixInitialHeight)
 	if len(initialHeightStr) == 0 {
@@ -720,7 +781,7 @@ func (app *Application) getAppHeight() int64 {
 
 func (app *Application) checkHeightAndExtensions(isPrepareProcessProposal bool, height int64, callsite string) (int64, bool) {
 	appHeight := app.getAppHeight()
-	if height >= appHeight+NStates {
+	if height >= appHeight+int64(app.cfg.NStates) {
 		panic(fmt.Errorf(
 			"got unexpected height in %s request; expected %d, actual %d",
 			callsite, appHeight, height,

@@ -165,7 +165,7 @@ func BootstrapState(ctx context.Context, config *cfg.Config, dbProvider cfg.DBPr
 	}
 	blockStoreDB, stateDB, err := initDBs(config, dbProvider)
 
-	blockStore := store.NewBlockStore(blockStoreDB, store.WithMetrics(store.NopMetrics()), store.WithCompaction(config.Storage.Compact, config.Storage.CompactionInterval), store.WithDBKeyLayout(config.Storage.ExperimentalKeyLayout))
+	blockStore := store.NewBlockStore(blockStoreDB, config.Consensus.NStates, store.WithMetrics(store.NopMetrics()), store.WithCompaction(config.Storage.Compact, config.Storage.CompactionInterval), store.WithDBKeyLayout(config.Storage.ExperimentalKeyLayout))
 	logger.Info("Blockstore version", "version", blockStore.GetVersion())
 
 	defer func() {
@@ -301,7 +301,7 @@ func NewNode(ctx context.Context,
 		DBKeyLayout:          config.Storage.ExperimentalKeyLayout,
 	})
 
-	blockStore := store.NewBlockStore(blockStoreDB, store.WithMetrics(bstMetrics), store.WithCompaction(config.Storage.Compact, config.Storage.CompactionInterval), store.WithDBKeyLayout(config.Storage.ExperimentalKeyLayout), store.WithDBKeyLayout(config.Storage.ExperimentalKeyLayout))
+	blockStore := store.NewBlockStore(blockStoreDB, config.Consensus.NStates, store.WithMetrics(bstMetrics), store.WithCompaction(config.Storage.Compact, config.Storage.CompactionInterval), store.WithDBKeyLayout(config.Storage.ExperimentalKeyLayout), store.WithDBKeyLayout(config.Storage.ExperimentalKeyLayout))
 	logger.Info("Blockstore version", "version", blockStore.GetVersion())
 
 	// The key will be deleted if it existed.
@@ -363,7 +363,7 @@ func NewNode(ctx context.Context,
 	// and replays any blocks as necessary to sync CometBFT with the app.
 	consensusLogger := logger.With("module", "consensus")
 	if !stateSync {
-		if err := doHandshake(ctx, stateStore, state, blockStore, genDoc, eventBus, proxyApp, consensusLogger); err != nil {
+		if err := doHandshake(ctx, stateStore, state, blockStore, genDoc, eventBus, proxyApp, consensusLogger, config.Consensus.NStates); err != nil {
 			return nil, err
 		}
 
@@ -413,6 +413,7 @@ func NewNode(ctx context.Context,
 		mempool,
 		evidencePool,
 		blockStore,
+		config.Consensus.NStates,
 		sm.BlockExecutorWithPruner(pruner),
 		sm.BlockExecutorWithMetrics(smMetrics),
 	)

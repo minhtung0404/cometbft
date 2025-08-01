@@ -186,7 +186,7 @@ func NewCLI() *CLI {
 
 	cli.root.PersistentFlags().StringP("infrastructure-data", "", "", "path to the json file containing the infrastructure data. Only used if the 'infrastructure-type' is set to a value other than 'docker'")
 
-	cli.root.Flags().BoolVarP(&cli.preserve, "preserve", "p", false,
+	cli.root.PersistentFlags().BoolVarP(&cli.preserve, "preserve", "p", false,
 		"Preserves the running of the test net after tests are completed")
 
 	cli.root.AddCommand(&cobra.Command{
@@ -363,7 +363,12 @@ Does not run any perturbations.
 				return err
 			}
 
-			return Cleanup(cli.testnet)
+			if !cli.preserve {
+				if err := Cleanup(cli.testnet); err != nil {
+					return err
+				}
+			}
+			return nil
 		},
 	})
 

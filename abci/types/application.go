@@ -29,6 +29,8 @@ type Application interface {
 	// Commit the state and return the application Merkle root hash
 	Commit(ctx context.Context, req *CommitRequest) (*CommitResponse, error)
 
+	// Check if two blocks are commutative
+
 	// State Sync Connection
 	ListSnapshots(ctx context.Context, req *ListSnapshotsRequest) (*ListSnapshotsResponse, error)                // List available snapshots
 	OfferSnapshot(ctx context.Context, req *OfferSnapshotRequest) (*OfferSnapshotResponse, error)                // Offer a snapshot to the application

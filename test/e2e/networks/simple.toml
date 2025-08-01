@@ -1,4 +1,14 @@
+n_states = 4
+load_rate = "50ms"
+
 [node.validator00]
+zone = "Canada"
+
 [node.validator01]
+zone = "Ireland"
+
 [node.validator02]
+zone = "Tokyo"
+
 [node.validator03]
+zone = "N_California"

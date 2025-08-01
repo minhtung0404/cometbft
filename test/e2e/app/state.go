@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 )
 
 const (
@@ -47,7 +48,7 @@ func NewState(dir string, persistInterval uint64) (*State, error) {
 		previousFile:    filepath.Join(dir, prevStateFileName),
 		persistInterval: persistInterval,
 	}
-	state.hash = hashItems(state.values, state.height)
+	state.hash = hashItems(state.values, 0)
 	err := state.load()
 	switch {
 	case errors.Is(err, os.ErrNotExist):
@@ -133,7 +134,7 @@ func (s *State) Export() ([]byte, uint64, []byte, error) {
 		return nil, 0, nil, err
 	}
 	height := s.height
-	stateHash := hashItems(s.values, height)
+	stateHash := hashItems(s.values, 0)
 	return bz, height, stateHash, nil
 }
 
@@ -149,7 +150,7 @@ func (s *State) Import(height uint64, jsonBytes []byte) error {
 	}
 	s.height = height
 	s.values = values
-	s.hash = hashItems(values, height)
+	s.hash = hashItems(values, 0)
 	return s.save()
 }
 
@@ -157,6 +158,7 @@ func (s *State) Import(height uint64, jsonBytes []byte) error {
 func (s *State) Get(key string) string {
 	s.RLock()
 	defer s.RUnlock()
+	time.Sleep(10 * time.Millisecond) // artificial delay to simulate work
 	return s.values[key]
 }
 
@@ -164,6 +166,7 @@ func (s *State) Get(key string) string {
 func (s *State) Set(key, value string) {
 	s.Lock()
 	defer s.Unlock()
+	time.Sleep(10 * time.Millisecond) // artificial delay to simulate work
 	if value == "" {
 		delete(s.values, key)
 	} else {
@@ -193,7 +196,7 @@ func (s *State) Finalize() []byte {
 	default:
 		s.height = 1
 	}
-	s.hash = hashItems(s.values, s.height)
+	s.hash = hashItems(s.values, 0)
 	return s.hash
 }
 
@@ -201,6 +204,7 @@ func (s *State) Finalize() []byte {
 func (s *State) Commit() (uint64, error) {
 	s.Lock()
 	defer s.Unlock()
+	time.Sleep(100 * time.Millisecond) // artificial delay to simulate work
 	if s.persistInterval > 0 && s.height%s.persistInterval == 0 {
 		err := s.save()
 		if err != nil {

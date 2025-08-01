@@ -39,10 +39,11 @@ var msgQueueSize = 1000
 type Barrier struct {
 	waitCond int64
 	cond     *sync.Cond
+	NStates  int64
 }
 
-func NewBarrier() *Barrier {
-	return &Barrier{waitCond: 0, cond: sync.NewCond(&sync.Mutex{})}
+func NewBarrier(NStates int) *Barrier {
+	return &Barrier{waitCond: 0, cond: sync.NewCond(&sync.Mutex{}), NStates: int64(NStates)}
 }
 
 func (b *Barrier) Wait(ctx int64) {
@@ -54,11 +55,59 @@ func (b *Barrier) Wait(ctx int64) {
 
 func (b *Barrier) Unlock(ctx int64) {
 	b.waitCond++
-	if b.waitCond == NStates {
+	if b.waitCond == b.NStates {
 		b.waitCond = 0
 	}
 	b.cond.Broadcast()
 	b.cond.L.Unlock()
+}
+
+type CommutativityBarrier struct {
+	waitCond int64
+	cond     *sync.Cond
+
+	blockExec   *sm.BlockExecutor
+	blocks      [][][]byte
+	commutative bool
+
+	NStates int64
+}
+
+func NewCommutativityBarrier(blockExec *sm.BlockExecutor, NStates int) *CommutativityBarrier {
+	return &CommutativityBarrier{
+		waitCond:    0,
+		cond:        sync.NewCond(&sync.Mutex{}),
+		blockExec:   blockExec,
+		blocks:      make([][][]byte, NStates),
+		commutative: false,
+		NStates:     int64(NStates),
+	}
+}
+
+func (b *CommutativityBarrier) Wait(idx int64, block [][]byte) bool {
+	b.cond.L.Lock()
+	defer b.cond.L.Unlock()
+
+	b.blocks[idx] = block
+	b.waitCond++
+
+	if b.waitCond == b.NStates {
+		// res, err := b.blockExec.CheckBlocksCommute(b.blocks)
+		res := true // DEBUG: set to always commute for testing
+		b.commutative = res
+		// if err != nil {
+		// 	b.commutative = false
+		// }
+
+		b.waitCond = 0
+		b.cond.Broadcast()
+		return b.commutative
+	}
+
+	for b.waitCond != 0 {
+		b.cond.Wait()
+	}
+	return b.commutative
 }
 
 // msgs from the reactor which may update the state.
@@ -171,6 +220,11 @@ type State struct {
 	// synchronization barrier
 	Barrier *Barrier
 	Idx     int64
+
+	// commutativity barrier
+	CommutativityBarrier *CommutativityBarrier
+
+	NStates int
 }
 
 // StateOption sets an optional parameter on the State.
@@ -184,6 +238,7 @@ func NewState(
 	blockStore sm.BlockStore,
 	txNotifier txNotifier,
 	evpool evidencePool,
+	NStates int,
 	options ...StateOption,
 ) *State {
 	cs := &State{
@@ -201,6 +256,7 @@ func NewState(
 		evpool:           evpool,
 		evsw:             cmtevents.NewEventSwitch(),
 		metrics:          NopMetrics(),
+		NStates:          NStates,
 	}
 	for _, option := range options {
 		option(cs)
@@ -691,14 +747,15 @@ func (cs *State) updateToState(state sm.State) {
 	}
 
 	if cs.state != nil && !cs.state.IsEmpty() {
-		if cs.state.LastBlockHeight > 0 && cs.state.LastBlockHeight+1 != cs.Height {
-			// This might happen when someone else is mutating cs.state.
-			// Someone forgot to pass in state.Copy() somewhere?!
-			panic(fmt.Sprintf(
-				"inconsistent cs.state.LastBlockHeight+1 %v vs cs.Height %v",
-				cs.state.LastBlockHeight+1, cs.Height,
-			))
-		}
+		// DEBUG: this is a temporary workaround for parallel commits
+		// if cs.state.LastBlockHeight > 0 && cs.state.LastBlockHeight+1 != cs.Height {
+		// 	// This might happen when someone else is mutating cs.state.
+		// 	// Someone forgot to pass in state.Copy() somewhere?!
+		// 	panic(fmt.Sprintf(
+		// 		"inconsistent cs.state.LastBlockHeight+1 %v vs cs.Height %v",
+		// 		cs.state.LastBlockHeight+1, cs.Height,
+		// 	))
+		// }
 		if cs.state.LastBlockHeight > 0 && cs.Height == cs.state.InitialHeight {
 			panic(fmt.Sprintf(
 				"inconsistent cs.state.LastBlockHeight %v, expected 0 for initial height %v",
@@ -748,8 +805,8 @@ func (cs *State) updateToState(state sm.State) {
 	}
 
 	// Next desired block height
-	height := state.LastBlockHeight + NStates
-	if height == NStates {
+	height := state.LastBlockHeight + int64(cs.NStates)
+	if height == int64(cs.NStates) {
 		height = int64(cs.Idx + 1)
 	}
 
@@ -794,7 +851,9 @@ func (cs *State) updateToState(state sm.State) {
 	cs.TriggeredTimeoutPrecommit = false
 
 	if cs.state != nil {
-		*cs.state = state
+		// Create a copy to avoid data race when updating the state
+		stateCopy := state.Copy()
+		cs.state = &stateCopy
 	}
 
 	// Finally, broadcast RoundState
@@ -1906,10 +1965,22 @@ func (cs *State) finalizeCommit(height int64) {
 
 	fail.Fail() // XXX
 
-	cs.Barrier.Wait(cs.Idx) // wait for all go routines to finish
+	// wait to check for commutativity
+	commute := cs.CommutativityBarrier.Wait(cs.Idx, block.Txs.ToSliceOfBytes())
+
+	if commute {
+		logger.Info("Blocks commutative", "height", height)
+	} else {
+		logger.Info("Blocks non-commutative", "height", height)
+	}
+
+	// if no commute, wait here
+	if !commute {
+		cs.Barrier.Wait(cs.Idx) // wait for all goroutines before it to finish
+	}
 
 	// Save to blockStore.
-	if cs.blockStore.Height() < block.Height {
+	if cs.blockStore.LoadBlockMeta(height) == nil {
 		// NOTE: the seenCommit is local justification to commit this block,
 		// but may differ from the LastCommit included in the next block
 		seenExtendedCommit := cs.Votes.Precommits(cs.CommitRound).MakeExtendedCommit(cs.state.ConsensusParams.Feature)
@@ -1917,6 +1988,7 @@ func (cs *State) finalizeCommit(height int64) {
 			cs.blockStore.SaveBlockWithExtendedCommit(block, blockParts, seenExtendedCommit)
 		} else {
 			cs.blockStore.SaveBlock(block, blockParts, seenExtendedCommit.ToCommit())
+			logger.Info("Saved block to blockstore ", "height", block.Height)
 		}
 	} else {
 		// Happens during replay if we already saved the block but didn't commit
@@ -1969,7 +2041,12 @@ func (cs *State) finalizeCommit(height int64) {
 
 	fail.Fail() // XXX
 
-	cs.Logger.Debug("Applied block", "height", cs.Height)
+	// if commute, wait here instead
+	if commute {
+		cs.Barrier.Wait(cs.Idx)
+	}
+
+	cs.Logger.Info("Applied block", "height", cs.Height)
 
 	// must be called before we update state
 	cs.recordMetrics(height, block)
@@ -1977,7 +2054,7 @@ func (cs *State) finalizeCommit(height int64) {
 	// NewHeightStep!
 	cs.updateToState(stateCopy)
 
-	cs.Logger.Debug("Applied block", "height", cs.Height)
+	cs.Logger.Info("Applied block and recorded metrics", "height", cs.Height, "last_commit_height", cs.LastCommit.GetHeight())
 
 	fail.Fail() // XXX
 
@@ -2008,7 +2085,7 @@ func (cs *State) recordMetrics(height int64, block *types.Block) {
 	// height=0 -> MissingValidators and MissingValidatorsPower are both 0.
 	// Remember that the first LastCommit is intentionally empty, so it's not
 	// fair to increment missing validators number.
-	if height >= cs.state.InitialHeight+NStates {
+	if height >= cs.state.InitialHeight+int64(cs.NStates) {
 		// Sanity check that commit size matches validator set size - only applies
 		// after first block.
 		var (

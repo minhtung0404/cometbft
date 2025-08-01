@@ -38,6 +38,8 @@ const (
 	defaultConnections = 1
 	defaultTxSizeBytes = 1024
 
+	defaultLoadRate = time.Second
+
 	localVersion = "cometbft/e2e-node:local-version"
 )
 
@@ -108,6 +110,8 @@ type Testnet struct {
 	DefaultZone                                          string
 	PbtsEnableHeight                                     int64
 	PbtsUpdateHeight                                     int64
+	NStates                                              int
+	LoadRate                                             time.Duration
 }
 
 // Node represents a CometBFT node in a testnet.
@@ -146,6 +150,7 @@ type Node struct {
 	DiscardABCIResponses    bool
 	Indexer                 string
 	ClockSkew               time.Duration
+	NStates                 int
 }
 
 // LoadTestnet loads a testnet from a manifest file. The testnet files are
@@ -211,6 +216,8 @@ func NewTestnetFromManifest(manifest Manifest, file string, ifd InfrastructureDa
 		DefaultZone:      manifest.DefaultZone,
 		PbtsEnableHeight: manifest.PbtsEnableHeight,
 		PbtsUpdateHeight: manifest.PbtsUpdateHeight,
+		NStates:          manifest.NStates,
+		LoadRate:         manifest.LoadRate,
 	}
 	if len(manifest.KeyType) != 0 {
 		testnet.KeyType = manifest.KeyType
@@ -233,6 +240,10 @@ func NewTestnetFromManifest(manifest Manifest, file string, ifd InfrastructureDa
 	if testnet.LoadTxSizeBytes == 0 {
 		testnet.LoadTxSizeBytes = defaultTxSizeBytes
 	}
+	if testnet.LoadRate == 0 {
+		testnet.LoadRate = defaultLoadRate
+	}
+	fmt.Println("Testnet load rate:", testnet.LoadRate)
 
 	for _, name := range sortNodeNames(manifest) {
 		nodeManifest := manifest.Nodes[name]
