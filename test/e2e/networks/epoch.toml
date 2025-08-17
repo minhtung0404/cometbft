@@ -1,3 +1,5 @@
+n_states = 1
+
 [node.validator00]
 [node.validator01]
 [node.validator02]
