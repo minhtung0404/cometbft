@@ -326,6 +326,10 @@ func NewTestnetFromManifest(manifest Manifest, file string, ifd InfrastructureDa
 			node.Zone = ZoneID(testnet.DefaultZone)
 		}
 
+		if nodeManifest.NStates == 0 {
+			node.NStates = 1
+		}
+
 		testnet.Nodes = append(testnet.Nodes, node)
 	}
 
