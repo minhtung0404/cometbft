@@ -41,6 +41,7 @@ func TestApp_Tx(t *testing.T) {
 		require.Zero(t, res.Code)
 
 		hash := tx.Hash()
+		fmt.Printf("Tx hash: %X\n", hash)
 		require.Equal(t, res.Hash, cmtbytes.HexBytes(hash))
 		waitTime := 30 * time.Second
 		require.Eventuallyf(t, func() bool {
