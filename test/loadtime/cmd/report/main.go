@@ -49,7 +49,7 @@ func main() {
 	}
 	s := store.NewBlockStore(db, *nstates)
 	defer s.Close()
-	rs, err := report.GenerateFromBlockStore(s)
+	rs, err := report.GenerateFromBlockStore(s, int64(*nstates))
 	if err != nil {
 		panic(err)
 	}

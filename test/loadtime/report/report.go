@@ -127,7 +127,7 @@ func (rs *Reports) addError() {
 
 // GenerateFromBlockStore creates a Report using the data in the provided
 // BlockStore.
-func GenerateFromBlockStore(s BlockStore) (*Reports, error) {
+func GenerateFromBlockStore(s BlockStore, nStates int64) (*Reports, error) {
 	type payloadData struct {
 		id                      uuid.UUID
 		l                       time.Duration
@@ -187,8 +187,7 @@ func GenerateFromBlockStore(s BlockStore) (*Reports, error) {
 
 	go func() {
 		base, height := s.Base(), s.Height()
-		prev, _ := s.LoadBlock(base)
-		for i := base + 1; i < height; i++ {
+		for i := base + nStates; i < height; i++ {
 			// Data from two adjacent block are used here simultaneously,
 			// blocks of height H and H+1. The transactions of the block of
 			// height H are used with the timestamp from the block of height
@@ -201,10 +200,10 @@ func GenerateFromBlockStore(s BlockStore) (*Reports, error) {
 			// be used in the latency calculations because the last block whose
 			// transactions are used is the block one before the last.
 			cur, _ := s.LoadBlock(i)
+			prev, _ := s.LoadBlock(i - nStates)
 			for _, tx := range prev.Data.Txs {
 				txc <- txData{tx: tx, bt: cur.Time}
 			}
-			prev = cur
 		}
 		close(txc)
 	}()
