@@ -1,5 +1,5 @@
 n_states = 4
-load_rate = "50ms"
+load_tx_batch_size = 2
 
 [node.validator00]
 zone = "Canada"
