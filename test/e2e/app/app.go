@@ -362,7 +362,7 @@ func (app *Application) FinalizeBlock(_ context.Context, req *abci.FinalizeBlock
 				},
 			},
 		},
-		NextBlockDelay: 1 * time.Second,
+		NextBlockDelay: 0 * time.Second,
 	}, nil
 }
 
