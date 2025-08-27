@@ -125,7 +125,7 @@ type Config struct {
 	ABCIRequestsLoggingEnabled bool `toml:"abci_requests_logging_enabled"`
 
 	// PbtsEnableHeight configures the first height during which
-	// the chain will start using Proposer-Based Timestamps (PBTS)
+	// the chain will start using Proposer-Based Timestamps PBTS
 	// to create and validate new blocks.
 	PbtsEnableHeight int64 `toml:"pbts_enable_height"`
 
@@ -370,7 +370,7 @@ func (app *Application) FinalizeBlock(_ context.Context, req *abci.FinalizeBlock
 				},
 			},
 		},
-		NextBlockDelay: 1 * time.Second,
+		NextBlockDelay: 0 * time.Second,
 	}, nil
 }
 
@@ -566,7 +566,7 @@ func (app *Application) PrepareProposal(
 			continue
 		}
 		txLen := cmttypes.ComputeProtoSizeForTxs([]cmttypes.Tx{tx})
-		if totalBytes+txLen > req.MaxTxBytes || len(txs) >= 2 {
+		if totalBytes+txLen > req.MaxTxBytes {
 			break
 		}
 		totalBytes += txLen
