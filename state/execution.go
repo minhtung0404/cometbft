@@ -171,6 +171,17 @@ func (blockExec *BlockExecutor) CreateProposalBlock(
 		return nil, err
 	}
 
+	// Log each transaction in the block
+	for i, tx := range txs {
+		blockExec.logger.Info(
+			"Tx proposed",
+			"height", height,
+			"index", i,
+			"hash", fmt.Sprintf("%X", tx.Hash()),
+			"size", len(tx),
+		)
+	}
+
 	return state.MakeBlock(height, txl, commit, evidence, proposerAddr, blockExec.NStates), nil
 }
 

@@ -385,7 +385,7 @@ func (mem *CListMempool) addTx(memTx *mempoolTx, sender p2p.ID) bool {
 	mem.txsBytes.Add(int64(len(tx)))
 	mem.metrics.TxSizeBytes.Observe(float64(len(tx)))
 
-	mem.logger.Debug(
+	mem.logger.Info(
 		"added valid transaction",
 		"tx", tx.Hash(),
 		"height", mem.height.Load(),
