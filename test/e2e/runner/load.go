@@ -125,6 +125,11 @@ func createTxBatch(ctx context.Context, txCh chan<- types.Tx, testnet *e2e.Testn
 				if err != nil {
 					panic(fmt.Sprintf("Failed to generate tx: %v", err))
 				}
+				// Log transaction hash with CometBFT logger
+				logger.Info("Sending transaction",
+					"hash", fmt.Sprintf("%X", types.Tx(tx).Hash()),
+					"size", len(tx),
+				)
 
 				select {
 				case txCh <- tx:

@@ -166,6 +166,16 @@ func (blockExec *BlockExecutor) CreateProposalBlock(
 	if err := txl.Validate(maxDataBytes); err != nil {
 		return nil, err
 	}
+	// Log each transaction in the block
+	for i, tx := range txs {
+		blockExec.logger.Info(
+			"Tx proposed",
+			"height", height,
+			"index", i,
+			"hash", fmt.Sprintf("%X", tx.Hash()),
+			"size", len(tx),
+		)
+	}
 
 	return state.MakeBlock(height, txl, commit, evidence, proposerAddr), nil
 }
@@ -261,6 +271,16 @@ func (blockExec *BlockExecutor) applyBlock(state State, blockID types.BlockID, b
 		"block_app_hash", fmt.Sprintf("%X", abciResponse.AppHash),
 		"syncing_to_height", syncingToHeight,
 	)
+	// Log each transaction in the block
+	for i, tx := range block.Data.Txs {
+		blockExec.logger.Info(
+			"Tx committed",
+			"height", block.Height,
+			"index", i,
+			"hash", fmt.Sprintf("%X", tx.Hash()),
+			"size", len(tx),
+		)
+	}
 
 	// Assert that the application correctly returned tx results for each of the transactions provided in the block
 	if len(block.Data.Txs) != len(abciResponse.TxResults) {
