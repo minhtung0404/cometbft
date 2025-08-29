@@ -274,6 +274,16 @@ func (blockExec *BlockExecutor) applyBlock(state State, blockID types.BlockID, b
 		"time", float64(endTime-startTime)/1000000,
 		"value", value,
 	)
+	// Log each transaction in the block
+	for i, tx := range block.Data.Txs {
+		blockExec.logger.Info(
+			"Tx committed",
+			"height", block.Height,
+			"index", i,
+			"hash", fmt.Sprintf("%X", tx.Hash()),
+			"size", len(tx),
+		)
+	}
 
 	// Assert that the application correctly returned tx results for each of the transactions provided in the block
 	if len(block.Data.Txs) != len(abciResponse.TxResults) {
