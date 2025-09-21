@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	mathrand "math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -308,12 +307,10 @@ func (app *Application) FinalizeBlock(_ context.Context, req *abci.FinalizeBlock
 	if err != nil {
 		return nil, err
 	}
-	app.logger.Info("starting to finalizing in app", "height", req.Height)
 
 	txs := make([]*abci.ExecTxResult, len(req.Txs))
 
 	for i, tx := range req.Txs {
-		app.logger.Info("starting to finalizing in app 2", "height", req.Height)
 		key, value, err := parseTx(tx)
 		if err != nil {
 			panic(err) // shouldn't happen since we verified it in CheckTx and ProcessProposal
@@ -322,7 +319,6 @@ func (app *Application) FinalizeBlock(_ context.Context, req *abci.FinalizeBlock
 			panic(fmt.Errorf("detected a transaction with key %q; this key is reserved and should have been filtered out", prefixReservedKey))
 		}
 		app.state.Set(key, value)
-		app.logger.Info("finalizing in app", "height", req.Height, "key", key, "value", value)
 
 		app.seenTxs.Delete(cmttypes.Tx(tx).Key())
 
@@ -552,9 +548,6 @@ func (app *Application) PrepareProposal(
 		// Coherence: No need to call parseTx, as the check is stateless and has been performed by CheckTx
 		totalBytes = extTxLen
 	}
-	mathrand.Shuffle(len(req.Txs), func(i, j int) {
-		req.Txs[i], req.Txs[j] = req.Txs[j], req.Txs[i]
-	})
 	for _, tx := range req.Txs {
 		if areExtensionsEnabled && strings.HasPrefix(string(tx), extTxPrefix) {
 			// When vote extensions are enabled, our generated transaction takes precedence
